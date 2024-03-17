@@ -101,6 +101,7 @@ async function updateOrders(side, chain, market_id) {
 
   if (orders.size == 0) {
     console.log('Empty orderbook update: ', { chain, side, market_id })
+    await setOrderbook(chain, side, market_id, orders)
     return
   }
 
@@ -128,7 +129,7 @@ function getRpc(network) {
 }
 
 async function connectAll() {
-  const uri = `mongodb://${process.env.MONGO_HOST}:${process.env.MONGO_PORT}/alcor_prod_new`
+  const uri = `mongodb://${process.env.MONGO_HOST}:${process.env.MONGO_PORT}/${process.env.MONGO_DB}`
   await mongoose.connect(uri, { useUnifiedTopology: true, useNewUrlParser: true, useCreateIndex: true })
 
   // Redis

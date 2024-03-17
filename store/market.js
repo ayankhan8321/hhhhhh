@@ -44,7 +44,7 @@ export const state = () => ({
   total_sell: null,
 
   markets_active_tab: null,
-  current_market_layout: 'classic',
+  current_market_layout: 'advanced',
   markets_layout: config.TRADE_LAYOUTS.advanced,
 
   orderbook_settings: {
@@ -217,6 +217,7 @@ export const actions = {
     })
 
     this.$socket.io.on('reconnect', () => {
+      console.warn('SOCKETIO RECONNECTED')
       commit('setBids', [])
       commit('setAsks', [])
 
@@ -394,6 +395,8 @@ export const actions = {
     }
   },
   async calcAndSetTotal({ state, commit, dispatch }) {
+    console.log('calcAndSetTotal', state.amount_buy)
+
     if (state.amount_buy > 0) {
       const totalBuy = await dispatch('calculateTotal', { amount: state.amount_buy })
       commit('SET_TOTAL_BUY', totalBuy)
@@ -437,43 +440,56 @@ export const actions = {
   },
   async setPrecisionAmountBuy({ state, commit, dispatch }) {
     const prec = state.quote_token.symbol.precision
-    if (state.amount_buy) {
-      const amount = Big(state.amount_buy).round(prec, 0).toString()
-      commit('SET_AMOUNT_BUY', amount)
 
-      await dispatch('changeAmount', { amount, type: 'buy' })
-    } else {
-      commit('SET_AMOUNT_BUY', null)
-    }
+    // if (state.amount_buy) {
+    //   const amount = Big(state.amount_buy).round(prec, 0).toString()
+    //   commit('SET_AMOUNT_BUY', amount)
+
+    //   await dispatch('changeAmount', { amount, type: 'buy' })
+    // } else {
+    //   commit('SET_AMOUNT_BUY', null)
+    // }
   },
   async setPrecisionAmountSell({ state, commit, dispatch }) {
     const prec = state.quote_token.symbol.precision
-    if (state.amount_sell) {
-      const amount = Big(state.amount_sell).round(prec, 0).toString()
-      commit('SET_AMOUNT_SELL', amount)
 
-      await dispatch('changeAmount', { amount, type: 'sell' })
-    } else {
-      commit('SET_AMOUNT_SELL', null)
-    }
+    // if (state.amount_sell) {
+    //   const amount = Big(state.amount_sell).round(prec, 0).toString()
+    //   commit('SET_AMOUNT_SELL', amount)
+
+    //   await dispatch('changeAmount', { amount, type: 'sell' })
+    // } else {
+    //   commit('SET_AMOUNT_SELL', null)
+    // }
   },
-  setPrecisionTotalBuy({ state, commit }) {
-    const prec = state.base_token.symbol.precision
-    if (state.total_buy) {
-      const total = Big(state.total_buy).round(prec, 0).toString()
-      commit('SET_TOTAL_BUY', total)
-    } else {
-      commit('SET_TOTAL_BUY', null)
-    }
+
+  setPrecisionTotalBuy({ state, commit, dispatch }) {
+    // On total @change
+    dispatch('calcAndSetTotal')
+
+    //this.changeTotal({ total: state.total_buy, type: 'buy' })
+
+    // const prec = state.base_token.symbol.precision
+    // if (state.total_buy) {
+    //   const total = Big(state.total_buy).round(prec, 0).toString()
+    //   commit('SET_TOTAL_BUY', total)
+    // } else {
+    //   commit('SET_TOTAL_BUY', null)
+    // }
   },
-  setPrecisionTotalSell({ state, commit }) {
-    const prec = state.base_token.symbol.precision
-    if (state.total_sell) {
-      const total = Big(state.total_sell).round(prec, 0).toString()
-      commit('SET_TOTAL_SELL', total)
-    } else {
-      commit('SET_TOTAL_SELL', null)
-    }
+
+  setPrecisionTotalSell({ state, commit, dispatch }) {
+    // On amount @change
+    dispatch('calcAndSetTotal')
+
+    // const prec = state.base_token.symbol.precision
+
+    // if (state.total_sell) {
+    //   const total = Big(state.total_sell).round(prec, 0).toString()
+    //   commit('SET_TOTAL_SELL', total)
+    // } else {
+    //   commit('SET_TOTAL_SELL', null)
+    // }
   },
 
   calculatePercent({ state }, params) {
@@ -548,6 +564,8 @@ export const actions = {
           }, 1000)
         })
 
+      this._vm.$gtag.event('orderbook_trade', { chain: rootState.network.name })
+
       return { err: false, desc: res }
     } catch (e) {
       captureException(e, { extra: { order: this.order } })
@@ -610,6 +628,8 @@ export const actions = {
           }, 1000)
         })
 
+      this._vm.$gtag.event('orderbook_trade', { chain: rootState.network.name })
+
       return { err: false, desc: res }
     } catch (e) {
       captureException(e, { extra: { order: this.order } })
@@ -670,8 +690,6 @@ export const getters = {
     } else {
       pool.rate = (parseFloat(pool.pool1.quantity) / parseFloat(pool.pool2.quantity)).toFixed(6)
     }
-
-    console.log('new pool price:', pool.pool2.quantity.to_string())
 
     return pool
   },

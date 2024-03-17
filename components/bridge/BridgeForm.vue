@@ -1,6 +1,6 @@
 <template lang="pug">
 #bridge-form-component.form
-  .p-3
+  //.p-3
     el-alert(
       title="Bridge UI BETA Version"
       type="warning"
@@ -62,11 +62,11 @@
       .d-flex.justify-content-between.align-items-center.w-100(v-if="formData.sender")
         .d-flex.align-items-center.gap-8
           img(
-            :src='require("~/assets/icons/avatar.png")',
+            :src='require("~/assets/icons/" + sourceName + ".png")',
             height=18
           )
           .fs-14 {{ formData.sender }}
-        .d-flex.align-items-center.gap-8(@click.stop="logout('sender')")
+        .d-flex.align-items-center.gap-8.pointer(@click.stop="logout('sender')")
           .fs-12 Logout
           i.el-icon-right
       .fs-14(v-else) Connect Wallet
@@ -78,11 +78,11 @@
       .d-flex.justify-content-between.align-items-center.w-100(v-if="formData.receiver")
         .d-flex.align-items-center.gap-8
           img(
-            :src='require("~/assets/icons/avatar.png")',
+            :src='require("~/assets/icons/" + destinationName + ".png")',
             height=18
           )
           .fs-14 {{ formData.receiver }}
-        .d-flex.align-items-center.gap-8(@click.stop="logout('receiver')")
+        .d-flex.align-items-center.gap-8.pointer(@click.stop="logout('receiver')")
           .fs-12 Logout
           i.el-icon-right
       .fs-14(v-else) Connect Wallet
@@ -97,11 +97,11 @@
         .small.muted.text-center Chose Send & Receive
 
       template(slot="prefix" v-if="this.asset")
-        TokenImage(:src="$tokenLogo(asset.symbol, asset.sourceTokenContract)" height="20")
+        TokenImage(:src="$tokenLogo(asset.symbol, asset.sourceTokenContract, sourceName)" height="20")
 
       AlcorOptionTwo(:value="asset" :label="asset.symbol" v-for="asset in availableAssets")
         .d-flex.align-items-center.w-100
-          TokenImage(:src="$tokenLogo(asset.symbol, asset.sourceTokenContract)" height="25")
+          TokenImage(:src="$tokenLogo(asset.symbol, asset.sourceTokenContract, sourceName)" height="25")
           .ml-2 {{ asset.symbol}}
 
   .d-flex.justify-content-center.mt-4
@@ -134,11 +134,16 @@
       el-dropdown-menu.bridge-setting-dropdown.p-2
         AlcorButton(@click="resetState") ⚠️ {{ $t('Reset State') }}
 
-  //BridgeHistory
+  .d-flex.justify-content-center.mt-3(v-if="step === 4")
+    nuxt-link(to='/farm')
+      img(src="~/assets/promo/bridge_banner.png")
+
+  BridgeHistory(:sourceWallet="sourceWallet" :destinationWallet="destinationWallet" :connectToWallet="connectToWallet")
 </template>
 
 <script>
 // TODO Implement list of wallets
+// TODO CHECK RAM DESTINATION
 import { mapGetters, mapState, mapMutations } from 'vuex'
 import { IBCTransfer } from '~/core/ibc.js'
 
@@ -164,7 +169,7 @@ export default {
     TokenImage,
     AlcorSelectTwo,
     AlcorOptionTwo,
-    BridgeHistory
+    BridgeHistory,
   },
 
   data: () => ({
@@ -176,31 +181,34 @@ export default {
     formData: {
       amount: null,
       sender: null,
-      receiver: null
+      receiver: null,
     },
 
     sourceWallet: null,
     destinationWallet: null,
 
-    fromNetworkOptions: [{
-      value: 'eos',
-      label: 'EOS'
-    },
-    {
-      value: 'wax',
-      label: 'WAX'
-    },
-    //{
-    //  value: 'proton',
-    //  label: 'Proton'
-    //},
-    {
-      value: 'telos',
-      label: 'Telos'
-    }, {
-      value: 'ux',
-      label: 'UX Network'
-    }]
+    fromNetworkOptions: [
+      {
+        value: 'eos',
+        label: 'EOS',
+      },
+      {
+        value: 'wax',
+        label: 'WAX',
+      },
+      //{
+      //  value: 'proton',
+      //  label: 'Proton'
+      //},
+      {
+        value: 'telos',
+        label: 'Telos',
+      },
+      {
+        value: 'ux',
+        label: 'UX Network',
+      },
+    ],
   }),
 
   computed: {
@@ -209,7 +217,7 @@ export default {
     ...mapGetters({
       source: 'ibcBridge/source',
       destination: 'ibcBridge/destination',
-      availableAssets: 'ibcBridge/availableAssets'
+      availableAssets: 'ibcBridge/availableAssets',
     }),
 
     ...mapState('ibcBridge', [
@@ -219,7 +227,7 @@ export default {
       'error',
       'result',
       'proofs',
-      'step'
+      'step',
     ]),
 
     inProgress() {
@@ -237,46 +245,130 @@ export default {
 
       if (this.step === 0) {
         return [
-          { id: 0, progress, label: 'Submitting source chain transfer', status, message: this.error },
-          { id: 1, progress, label: 'Waiting for transaction irreversibility', status: 'waiting' },
-          { id: 2, progress, label: 'Fetching proof for interchain transfer', status: 'waiting' },
-          { id: 3, progress, label: 'Submitting proof(s)', status: 'waiting' }
+          {
+            id: 0,
+            progress,
+            label: 'Submitting source chain transfer',
+            status,
+            message: this.error,
+          },
+          {
+            id: 1,
+            progress,
+            label: 'Waiting for transaction irreversibility',
+            status: 'waiting',
+          },
+          {
+            id: 2,
+            progress,
+            label: 'Fetching proof for interchain transfer',
+            status: 'waiting',
+          },
+          { id: 3, progress, label: 'Submitting proof(s)', status: 'waiting' },
         ]
       }
 
       if (this.step === 1) {
         return [
-          { id: 0, progress, label: 'Submitting source chain transfer', status: 'success' },
-          { id: 1, progress, label: 'Waiting for transaction irreversibility', status, message: this.error },
-          { id: 2, progress, label: 'Fetching proof for interchain transfer', status: 'waiting' },
-          { id: 3, progress, label: 'Submitting proof(s)', status: 'waiting' }
+          {
+            id: 0,
+            progress,
+            label: 'Submitting source chain transfer',
+            status: 'success',
+          },
+          {
+            id: 1,
+            progress,
+            label: 'Waiting for transaction irreversibility',
+            status,
+            message: this.error,
+          },
+          {
+            id: 2,
+            progress,
+            label: 'Fetching proof for interchain transfer',
+            status: 'waiting',
+          },
+          { id: 3, progress, label: 'Submitting proof(s)', status: 'waiting' },
         ]
       }
 
       if (this.step === 2) {
         return [
-          { id: 0, progress, label: 'Submitting source chain transfer', status: 'success' },
-          { id: 1, progress, label: 'Waiting for transaction irreversibility', status: 'success' },
-          { id: 2, progress, label: 'Fetching proof for interchain transfer', status, message: this.error },
-          { id: 3, progress, label: 'Submitting proof(s)', status: 'waiting' }
+          {
+            id: 0,
+            progress,
+            label: 'Submitting source chain transfer',
+            status: 'success',
+          },
+          {
+            id: 1,
+            progress,
+            label: 'Waiting for transaction irreversibility',
+            status: 'success',
+          },
+          {
+            id: 2,
+            progress,
+            label: 'Fetching proof for interchain transfer',
+            status,
+            message: this.error,
+          },
+          { id: 3, progress, label: 'Submitting proof(s)', status: 'waiting' },
         ]
       }
 
       if (this.step === 3) {
         return [
-          { id: 0, progress, label: 'Submitting source chain transfer', status: 'success' },
-          { id: 1, progress, label: 'Waiting for transaction irreversibility', status: 'success' },
-          { id: 2, progress, label: 'Fetching proof for interchain transfer', status: 'success' },
-          { id: 3, progress, label: 'Submitting proof(s)', status, message: this.error }
+          {
+            id: 0,
+            progress,
+            label: 'Submitting source chain transfer',
+            status: 'success',
+          },
+          {
+            id: 1,
+            progress,
+            label: 'Waiting for transaction irreversibility',
+            status: 'success',
+          },
+          {
+            id: 2,
+            progress,
+            label: 'Fetching proof for interchain transfer',
+            status: 'success',
+          },
+          {
+            id: 3,
+            progress,
+            label: 'Submitting proof(s)',
+            status,
+            message: this.error,
+          },
         ]
       }
 
       if (this.step === 4) {
         return [
-          { id: 0, progress, label: 'Submitting source chain transfer', status: 'success' },
-          { id: 1, progress, label: 'Waiting for transaction irreversibility', status: 'success' },
-          { id: 2, progress, label: 'Fetching proof for interchain transfer', status: 'success' },
-          { id: 3, progress, label: 'Submitting proof(s)', status: 'success' }
+          {
+            id: 0,
+            progress,
+            label: 'Submitting source chain transfer',
+            status: 'success',
+          },
+          {
+            id: 1,
+            progress,
+            label: 'Waiting for transaction irreversibility',
+            status: 'success',
+          },
+          {
+            id: 2,
+            progress,
+            label: 'Fetching proof for interchain transfer',
+            status: 'success',
+          },
+          { id: 3, progress, label: 'Submitting proof(s)', status: 'success' },
         ]
       }
 
@@ -284,39 +376,42 @@ export default {
     },
 
     asset: {
-      set (asset) {
+      set(asset) {
         return this.setAsset(asset)
       },
 
-      get () {
+      get() {
         return this.$store.state.ibcBridge.asset
-      }
+      },
     },
 
     sourceName: {
-      set (chain) {
+      set(chain) {
         return this.setSourceName(chain)
       },
 
-      get () {
+      get() {
         return this.$store.state.ibcBridge.sourceName
-      }
+      },
     },
 
     destinationName: {
-      set (chain) {
+      set(chain) {
         return this.setDestinationName(chain)
       },
 
-      get () {
+      get() {
         return this.$store.state.ibcBridge.destinationName
-      }
+      },
     },
 
     isValid() {
-      return Object.values(this.formData).every(Boolean) &&
-        this.destinationWallet && this.sourceWallet
-    }
+      return (
+        Object.values(this.formData).every(Boolean) &&
+        this.destinationWallet &&
+        this.sourceWallet
+      )
+    },
   },
 
   watch: {
@@ -325,34 +420,33 @@ export default {
     },
 
     sourceName() {
-      //this.loadUncompletedTransfers()
-
       if (this.sourceName == this.destinationName) {
         this.destinationName = null
         if (this.step === 4 || this.step === null) this.asset = null
-      } else if (this.sourceWallet) {
+      }
+
+      if (this.sourceWallet) {
         this.logout('sender')
       }
     },
 
     destinationName() {
-      //this.loadUncompletedTransfers()
-
       if (this.destinationName == this.sourceName) {
         this.sourceName = null
         if (this.step === 4 || this.step === null) this.asset = null
-      } else if (this.destinationWallet) {
+      }
+
+      if (this.destinationWallet) {
         this.logout('receiver')
       }
-    }
+    },
   },
 
   mounted() {
     // TODO source and destination by query params
-    if (this.inProgress && this.asset?.quantity) this.formData.amount = parseFloat(this.asset.quantity)
+    if (this.inProgress && this.asset?.quantity)
+      this.formData.amount = parseFloat(this.asset.quantity)
     if (this.inProgress && !this.error) this.setError('Window was closed')
-
-    this.loadUncompletedTransfers()
   },
 
   methods: {
@@ -365,36 +459,23 @@ export default {
       setError: 'ibcBridge/setError',
       setProofs: 'ibcBridge/setProofs',
       setResult: 'ibcBridge/setResult',
-      setAsset: 'ibcBridge/setAsset'
+      setAsset: 'ibcBridge/setAsset',
     }),
-
-    loadUncompletedTransfers() {
-      //console.log('loadUncompletedTransfers')
-      ////if (!this.sourceWallet || !this.destinationWallet) return
-      //if (!this.sourceWallet) return
-
-      //const { source, sourceWallet } = this
-
-      //// Load from source
-
-      //console.log('this.sourceWallet.name', sourceWallet.name)
-
-      //const url =
-      //  `${source.hyperion}/v2/history/get_actions?account=${tokenRow.wrapLockContract}&filter=${tokenRow.nativeTokenContract}:transfer&transfer.from=${sourceWallet.name}&transfer.memo=${destinationChain.auth.actor}&limit=15`
-
-      //if(tokenRow.native) url = `${sourceChain.hyperion}/v2/history/get_actions?account=${tokenRow.wrapLockContract}&filter=${tokenRow.nativeTokenContract}:transfer&transfer.from=${sourceChain.auth.actor}&transfer.memo=${destinationChain.auth.actor}&limit=15`; //else url = `${sourceChain.hyperion}/v2/history/get_actions?account=${sourceChain.auth.actor}&filter=${tokenRow.pairedWrapTokenContract}:retire&limit=15`;
-    },
 
     resetState() {
       this.$confirm(
         'You current state of transfer will be cleaned. If you have issue with bridge transfer, ask help in telegram chat!',
-        'Reset State', {
+        'Reset State',
+        {
           confirmButtonText: 'OK',
           cancelButtonText: 'Cancel',
-          type: 'warning'
-        }).then(() => {
-        this.clear()
-      }).catch(() => {})
+          type: 'warning',
+        }
+      )
+        .then(() => {
+          this.clear()
+        })
+        .catch(() => {})
     },
 
     clear() {
@@ -420,7 +501,6 @@ export default {
 
     reset() {
       //this.finished = false
-
       //this.result = {
       //  source: '',
       //  destination: ''
@@ -437,7 +517,9 @@ export default {
 
     async transfer() {
       const { destination, destinationWallet } = this
-      const destinationRpc = getMultyEndRpc(Object.keys(destination.client_nodes))
+      const destinationRpc = getMultyEndRpc(
+        Object.keys(destination.client_nodes)
+      )
 
       if (this.error && this.step == 3) {
         // We are trying to generate proofs again
@@ -445,10 +527,33 @@ export default {
       }
 
       if (this.step === 4 || !this.step) {
-        if (!this.sourceName || !this.destinationName) return this.$notify({ type: 'info', title: 'IBC', message: 'Select chains' })
-        if (!this.sourceWallet || !this.destinationWallet) return this.$notify({ type: 'info', title: 'IBC', message: 'Connect wallets' })
-        if ((!this.formData.amount || parseFloat(this.formData.amount) <= 0) && !this.step) return this.$notify({ type: 'info', title: 'IBC', message: 'Select amount' })
-        if (!this.asset) return this.$notify({ type: 'info', title: 'IBC', message: 'Select IBC Token' })
+        if (!this.sourceName || !this.destinationName)
+          return this.$notify({
+            type: 'info',
+            title: 'IBC',
+            message: 'Select chains',
+          })
+        if (!this.sourceWallet || !this.destinationWallet)
+          return this.$notify({
+            type: 'info',
+            title: 'IBC',
+            message: 'Connect wallets',
+          })
+        if (
+          (!this.formData.amount || parseFloat(this.formData.amount) <= 0) &&
+          !this.step
+        )
+          return this.$notify({
+            type: 'info',
+            title: 'IBC',
+            message: 'Select amount',
+          })
+        if (!this.asset)
+          return this.$notify({
+            type: 'info',
+            title: 'IBC',
+            message: 'Select IBC Token',
+          })
 
         this.setStep(0)
         this.setResult(0)
@@ -462,10 +567,17 @@ export default {
             this.asset.symbol
           )
 
-          this.asset.quantity = parseFloat(this.formData.amount).toFixed(precision) + ' ' + this.asset.symbol
+          this.asset.quantity =
+            parseFloat(this.formData.amount).toFixed(precision) +
+            ' ' +
+            this.asset.symbol
         } catch (e) {
           this.setStep(null)
-          return this.$notify({ type: 'error', title: 'Error fetch tokens', message: e })
+          return this.$notify({
+            type: 'error',
+            title: 'Error fetch tokens',
+            message: e,
+          })
         }
       } else {
         if ((this.step === 2 || this.step == 3) && !this.destinationWallet) {
@@ -479,14 +591,25 @@ export default {
         this.setError(null)
       }
 
-      const ibcTransfer = new IBCTransfer(this.source, this.destination, this.sourceWallet, this.destinationWallet, this.asset, this.updateProgress)
+      const ibcTransfer = new IBCTransfer(
+        this.source,
+        this.destination,
+        this.sourceWallet,
+        this.destinationWallet,
+        this.asset,
+        this.updateProgress
+      )
 
       if (this.step === 0) {
         try {
           // TODO CPU/NET warning probably
           await destinationRpc.get_account(this.destinationWallet.name)
         } catch (e) {
-          return this.$notify({ type: 'warning', title: 'Bridge Transfer', message: 'Destination account does not exists' })
+          return this.$notify({
+            type: 'warning',
+            title: 'Bridge Transfer',
+            message: 'Destination account does not exists',
+          })
         }
 
         try {
@@ -505,7 +628,11 @@ export default {
           return await this.transfer()
         } catch (e) {
           this.setStep(null)
-          return this.$notify({ type: 'warning', title: 'Sign transaction', message: e })
+          return this.$notify({
+            type: 'warning',
+            title: 'Sign transaction',
+            message: e,
+          })
         }
       }
 
@@ -518,7 +645,11 @@ export default {
 
         try {
           //throw new Error('test asdfasf 1')
-          const tx = await ibcTransfer.waitForLIB(this.source, this.tx, this.packedTx)
+          const tx = await ibcTransfer.waitForLIB(
+            this.source,
+            this.tx,
+            this.packedTx
+          )
           this.setTx(tx)
           this.setStep(2)
           console.log('clean error step 1')
@@ -526,7 +657,11 @@ export default {
           return await this.transfer()
         } catch (e) {
           this.setError(e.message)
-          return this.$notify({ type: 'error', title: 'Waiting for LIB', message: e })
+          return this.$notify({
+            type: 'error',
+            title: 'Waiting for LIB',
+            message: e,
+          })
         } finally {
           clearInterval(progressInterval)
           this.updateProgress(0)
@@ -541,7 +676,8 @@ export default {
           const last_proven_block = await ibcTransfer.getLastProvenBlock()
 
           console.log('this.tx', this.tx)
-          const scheduleProofs = (await ibcTransfer.getScheduleProofs(this.tx)) || []
+          const scheduleProofs =
+            (await ibcTransfer.getScheduleProofs(this.tx)) || []
 
           // TODO Popup
           for (const proof of scheduleProofs) {
@@ -554,7 +690,9 @@ export default {
           const emitxferAction = ibcTransfer.findEmitxferAction(this.tx)
           console.log('emitxferAction', emitxferAction)
 
-          const light = last_proven_block && last_proven_block.block_height > this.tx.processed.block_num
+          const light =
+            last_proven_block &&
+            last_proven_block.block_height > this.tx.processed.block_num
           //const light = false
 
           console.log({ light })
@@ -563,14 +701,16 @@ export default {
           const query = {
             type: light ? 'lightProof' : 'heavyProof',
             action: emitxferAction,
-            block_to_prove: this.tx.processed.block_num //block that includes the emitxfer action we want to prove
+            block_to_prove: this.tx.processed.block_num, //block that includes the emitxfer action we want to prove
           }
 
           if (light) query.last_proven_block = last_proven_block.block_height
 
           const emitxferProof = await ibcTransfer.getProof(query)
 
-          if (light) emitxferProof.data.blockproof.root = last_proven_block.block_merkle_root
+          if (light)
+            emitxferProof.data.blockproof.root =
+              last_proven_block.block_merkle_root
 
           console.log('emitxferProof', emitxferProof)
 
@@ -588,7 +728,11 @@ export default {
           return this.transfer()
         } catch (e) {
           this.setError(e.message)
-          return this.$notify({ type: 'error', title: 'Fetching Proofs', message: e })
+          return this.$notify({
+            type: 'error',
+            title: 'Fetching Proofs',
+            message: e,
+          })
         }
       }
 
@@ -610,8 +754,23 @@ export default {
           this.formData.amount = null
           this.updateProgress(0)
         } catch (e) {
-          this.setError(e.message)
-          return this.$notify({ type: 'error', title: 'Submitting Destination Proofs ', message: e })
+          if (!e.message?.includes('action already proved')) {
+            this.setError(e.message)
+            return this.$notify({
+              type: 'error',
+              title: 'Submitting Destination Proofs ',
+              message: e,
+            })
+          } else {
+            this.setStep(4)
+
+            console.log('clean error step 3')
+            if (this.error) this.setError(null)
+
+            this.asset = null
+            this.formData.amount = null
+            this.updateProgress(0)
+          }
         }
       }
     },
@@ -622,10 +781,19 @@ export default {
 
     async setMax() {
       if (!this.sourceWallet) {
-        return this.$notify({ type: 'info', title: 'Connect wallet', message: 'Connect source wallet to set max amount' })
+        return this.$notify({
+          type: 'info',
+          title: 'Connect wallet',
+          message: 'Connect source wallet to set max amount',
+        })
       }
 
-      if (!this.asset) return this.$notify({ type: 'info', title: 'Select IBC Token', message: 'Select IBC token to set MAX amount' })
+      if (!this.asset)
+        return this.$notify({
+          type: 'info',
+          title: 'Select IBC Token',
+          message: 'Select IBC token to set MAX amount',
+        })
 
       const contract = this.asset.native
         ? this.asset.nativeTokenContract
@@ -633,17 +801,28 @@ export default {
 
       let balances
       try {
-        const { data } = await this.$axios.get(`${this.source.lightapi}/api/balances/${this.source.name}/${this.sourceWallet.name}`)
+        const { data } = await this.$axios.get(
+          `${this.source.lightapi}/api/balances/${this.source.name}/${this.sourceWallet.name}`
+        )
         balances = data.balances
       } catch (e) {
-        return this.$notify({ type: 'warning', title: 'Fail Balance fetch', message: e.message })
+        return this.$notify({
+          type: 'warning',
+          title: 'Fail Balance fetch',
+          message: e.message,
+        })
       }
 
-      const balance = balances.find(b => {
+      const balance = balances.find((b) => {
         return b.currency === this.asset.symbol && b.contract === contract
       })
 
-      if (!balance) return this.$notify({ type: 'warning', title: 'Set MAX', message: 'No balance found' })
+      if (!balance)
+        return this.$notify({
+          type: 'warning',
+          title: 'Set MAX',
+          message: 'No balance found',
+        })
 
       this.formData.amount = balance.amount
     },
@@ -655,36 +834,49 @@ export default {
 
     async connectFromWallet() {
       try {
-        const { wallet, name, authorization } = await this.$store.dispatch('chain/asyncLogin', {
-          chain: this.sourceName,
-          message: 'Connect Source Wallet'
-        })
+        const { wallet, name, authorization } = await this.$store.dispatch(
+          'chain/asyncLogin',
+          {
+            chain: this.sourceName,
+            message: 'Connect Source Wallet',
+          }
+        )
 
         this.formData.sender = name
         this.sourceWallet = { wallet, name, authorization }
-        this.loadUncompletedTransfers()
       } catch (e) {
-        this.$notify({ type: 'warning', title: 'Wallet not connected', message: e })
+        this.$notify({
+          type: 'warning',
+          title: 'Wallet not connected',
+          message: e,
+        })
       }
     },
 
     async connectToWallet() {
       // TODO Анкер не подрубается со второго раза
       try {
-        const { wallet, name, authorization } = await this.$store.dispatch('chain/asyncLogin', {
-          chain: this.destinationName,
-          message: 'Connect Destination Wallet'
-        })
+        const { wallet, name, authorization } = await this.$store.dispatch(
+          'chain/asyncLogin',
+          {
+            chain: this.destinationName,
+            message: 'Connect Destination Wallet',
+          }
+        )
 
         this.formData.receiver = name
         this.destinationWallet = { wallet, name, authorization }
         return { status: true }
       } catch (e) {
-        this.$notify({ type: 'warning', title: 'Wallet not connected', message: e })
+        this.$notify({
+          type: 'warning',
+          title: 'Wallet not connected',
+          message: e,
+        })
         return { status: false, e }
       }
-    }
-  }
+    },
+  },
 }
 </script>
 
@@ -705,6 +897,10 @@ export default {
     height: 40px;
   }
 
+  .banner {
+
+  }
+
   .choise-asset-btn {
     width: 140px;
 
@@ -714,7 +910,6 @@ export default {
       border-color: var(--main-green) !important;
       background-color: var(--btn-default);
     }
-
   }
 }
 .to-mobile {
@@ -727,16 +922,16 @@ export default {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-areas:
-    "sendFrom . receiveOn"
-    "to to to"
-    "connect-button-left . connect-button-right";
+    'sendFrom . receiveOn'
+    'to to to'
+    'connect-button-left . connect-button-right';
   .to {
     grid-area: to;
   }
-  .send-from{
+  .send-from {
     grid-area: sendFrom;
   }
-  .receive-on{
+  .receive-on {
     grid-area: receiveOn;
   }
   .connect-button-left {
@@ -760,16 +955,16 @@ export default {
     width: 100%;
   }
 }
-@media only screen and (max-width: 740px){
+@media only screen and (max-width: 740px) {
   .send-and-receive {
     grid-template-columns: 1fr;
     gap: 4px;
     grid-template-areas:
-      "sendFrom"
-      "connect-button-left"
-      "to"
-      "receiveOn"
-      "connect-button-right"
+      'sendFrom'
+      'connect-button-left'
+      'to'
+      'receiveOn'
+      'connect-button-right';
   }
   .to-desktop {
     display: none !important;
@@ -777,14 +972,14 @@ export default {
   .to-mobile {
     display: flex;
   }
-  .amount-container{
+  .amount-container {
     gap: 4px;
   }
-  .transfer-btn{
+  .transfer-btn {
     width: 100%;
   }
 }
-@media only screen and (max-width: 480px){
+@media only screen and (max-width: 480px) {
   .form {
     padding: 16px 8px;
   }

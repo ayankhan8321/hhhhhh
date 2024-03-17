@@ -24,7 +24,7 @@
     .w-100.position-relative
       .d-flex.align-items-center.justify-content-center.position-absolute.w-100.z-1.arrow-pos
         .bottom-icon(@click="toggleTokens")
-          i.el-icon-bottom.text-center.fs-20.pointer
+          i.el-icon-bottom.text-center.fs-20.pointer(v-mutted="loading")
 
     PoolTokenInput.mt-1(
       :label="$t('Buy')"
@@ -125,8 +125,9 @@
                 .p-1
                   SwapRoute(:route="route")
     AuthOnly.w-100.mt-2
-      AlcorButton.w-100.submit(@click="submit" big access :disabled="!canSubmit" :class="{ disabled: !canSubmit }") {{ renderSubmitText }}
+      AlcorButton.w-100.submit(@click="submit" big access :disabled="!canSubmit || loading" :class="{ disabled: !canSubmit }") {{ renderSubmitText }}
   RandomBanner(
+    v-if="!hideBanner"
     :banners="banners"
   )
 </template>
@@ -147,13 +148,15 @@ import AlcorButton from '~/components/AlcorButton'
 import PoolTokenInput from '~/components/amm/PoolTokenInput'
 import Settings from '~/components/amm/Settings'
 import SwapRoute from '~/components/swap/SwapRoute'
-import { tryParseCurrencyAmount, constructPoolInstance } from '~/utils/amm'
+import { parseToken, tryParseCurrencyAmount, constructPoolInstance } from '~/utils/amm'
 import { getPrecision } from '~/utils'
 import AuthOnly from '~/components/AuthOnly'
 import RandomBanner from '~/components/alcor-element/RandomBanner'
 
 export default {
   name: 'SwapWidget',
+
+  props: ['hideBanner'],
 
   components: {
     AlcorContainer,
@@ -180,39 +183,44 @@ export default {
     priceImpact: '0.00',
     minReceived: 0,
     maximumSend: 0,
+    expectedInput: null,
     expectedOutput: null,
     route: null,
 
     memo: '', // Used for swap
+    market: null,
     routerCollapse: ['1'],
     lastField: 'input', // might be input/output
+
+    // Event listener
+    swapListener: null,
 
     rateInverted: false,
     banners: [
       {
-        link: 'https://discord.com/invite/Sxum2ETSzq',
-        image: require('@/assets/images/swap_banner.png'),
+        link: 'https://discord.gg/WjWeHejW2h',
+        image: require('@/assets/images/swap-banner-1.gif'),
         colors: [
-          'rgb(39,46,85)',
-          'rgb(33,39,68)',
-          'rgb(85,96,229)'
-        ]
+          'rgba(81,75,87,0.2)',
+          'rgba(130,125,138, 1)',
+          'rgba(127,122,130,1)',
+        ],
       },
       {
-        link: 'https://medium.com/@Novopangea.io/more-ways-to-novo-a32f35337c09',
+        link: 'https://creditmetaverse.io/',
         image: require('@/assets/images/swap-banner-2.jpg'),
         colors: [
-          'rgba(127, 12, 129, 0.4)',
-          '#47566d',
-          'rgba(255, 148, 23, 0.8)',
-        ]
+          'rgba(243,179,7,0.2)',
+          'rgba(54,40,96,1)',
+          'rgba(213,202,229, 1)',
+        ],
       },
     ]
   }),
 
   fetch() {
     // fetch has access to `this`
-    const { input, output, only } = this.$route.query
+    const { input, output, only, market } = this.$route.query
 
     if (input) {
       this.$store.commit('amm/swap/setInput', input.toLowerCase())
@@ -227,7 +235,33 @@ export default {
       this.$store.commit('amm/swap/setOnly', tokens)
     }
 
+    if (market) {
+      this.market = market
+    }
+
     this.$store.dispatch('amm/swap/setDefaultInputOutput')
+  },
+
+  mounted() {
+    this.swapListener = this.$socket.on('swap:pool:update', data => {
+      if (!this.tokenA || !this.tokenB) return
+
+      for (const pool of data) {
+        const tokenA = parseToken(pool.tokenA)
+        const tokenB = parseToken(pool.tokenB)
+
+        if (
+          (this.tokenA.equals(tokenA) && this.tokenB.equals(tokenB)) ||
+          (this.tokenA.equals(tokenB) && this.tokenB.equals(tokenA))
+        ) {
+          this.recalculateDelayed()
+        }
+      }
+    })
+  },
+
+  beforeDestroy() {
+    this.$socket.off('swap:pool:update', this.listener)
   },
 
   computed: {
@@ -306,13 +340,8 @@ export default {
       this.recalculate()
     },
 
-    pools() {
-      // Do we actually need that?
-      //this.recalculate()
-    },
-
     slippage() {
-      this.recalculate()
+      this.recalculateDelayed()
     }
   },
 
@@ -322,19 +351,33 @@ export default {
       'bestTradeExactOut'
     ]),
 
-    recalculate() {
+    recalculateDelayed() {
       if (this.loading) return
+
+      this.loading = true
       this.lastField == 'input' ? this.onTokenAInput(this.amountA) : this.onTokenBInput(this.amountB)
     },
 
-    toggleTokens() {
-      const [amountA, amountB] = [this.amountB, this.amountA]
-
-      this.amountA = amountA
-      this.amountB = amountB
-      this.$store.dispatch('amm/swap/flipTokens')
+    recalculate() {
+      if (this.loading) return
 
       this.loading = true
+      this.lastField == 'input' ? this.calcOutput(this.amountA) : this.calcInput(this.amountB)
+    },
+
+    toggleTokens() {
+      if (this.loading) return
+
+      this.loading = true
+
+      const amountB_before = this.amountB
+
+      this.reset()
+
+      this.lastField = 'input'
+      this.$store.dispatch('amm/swap/flipTokens')
+      this.amountA = amountB_before
+
       this.calcOutput(this.amountA)
     },
 
@@ -367,12 +410,27 @@ export default {
       if (this.tokenA && this.tokenB) this.calcOutput(this.amountA)
     },
 
+    reset({ amountA = null, amountB = null } = {}) {
+      this.amountA = amountA
+      this.amountB = amountB
+
+      this.priceInverted = '0.00'
+      this.price = '0.00'
+
+      this.priceImpact = '0.00'
+      this.minReceived = 0
+      this.maximumSend = 0
+      this.expectedInput = null
+      this.expectedOutput = null
+      this.route = null
+
+      this.memo = ''
+    },
+
     async submit() {
       try {
         await this.swap()
-        this.amountA = null
-        this.amountB = null
-
+        this.reset()
         this.updateBalances()
         return this.$notify({ type: 'success', title: 'Swap', message: 'Swap completed successfully' })
       } catch (e) {
@@ -391,56 +449,85 @@ export default {
     },
 
     async swap() {
-      const { amountA, amountB, tokenA, tokenB } = this
+      const { expectedInput, maximumSend, tokenA, tokenB, market } = this
       if (!tokenA || !tokenB) return console.log('no tokens selected')
 
       const exactIn = this.lastField == 'input'
 
-      const currencyAmountIn = tryParseCurrencyAmount((exactIn ? parseFloat(amountA) : parseFloat(this.maximumSend)).toFixed(tokenA.decimals), tokenA)
-      const currencyAmountOut = tryParseCurrencyAmount(parseFloat(amountB).toFixed(tokenB.decimals), tokenB)
+      console.log({ exactIn, expectedInput, maximumSend, tokenA })
+      const currencyAmountIn = tryParseCurrencyAmount((exactIn ? parseFloat(expectedInput) : parseFloat(maximumSend)).toFixed(tokenA.decimals), tokenA)
 
-      if (!currencyAmountIn) return console.log({ currencyAmountIn })
-      if (!currencyAmountOut) return console.log({ currencyAmountIn })
+      if (!currencyAmountIn) throw new Error('Invalid currency in: ', currencyAmountIn?.toAsset())
 
       const actions = []
 
+      let memo = this.memo.replace('<receiver>', this.user.name)
+
+      if (market) {
+        memo += `#${market}`
+      }
+
       // Memo Format <Service Name>#<Pool ID's>#<Recipient>#<Output Token>#<Deadline>
-      if (parseFloat(amountA) > 0)
-        actions.push({
-          account: tokenA.contract,
-          name: 'transfer',
-          authorization: [this.user.authorization],
-          data: {
-            from: this.user.name,
-            to: this.network.amm.contract,
-            quantity: currencyAmountIn.toAsset(),
-            memo: this.memo.replace('<receiver>', this.user.name) // In case we got route without login
-          }
-        })
+      // if (parseFloat(amountA) > 0) {
+      //   actions.push({
+      //     account: tokenA.contract,
+      //     name: 'transfer',
+      //     authorization: [this.user.authorization],
+      //     data: {
+      //       from: this.user.name,
+      //       to: this.network.amm.contract,
+      //       quantity: currencyAmountIn.toAsset(),
+      //       memo
+      //     }
+      //   })
+      // }
+
+      actions.push({
+        account: tokenA.contract,
+        name: 'transfer',
+        authorization: [this.user.authorization],
+        data: {
+          from: this.user.name,
+          to: this.network.amm.contract,
+          quantity: currencyAmountIn.toAsset(),
+          memo
+        }
+      })
 
       const r = await this.$store.dispatch('chain/sendTransaction', actions)
+
+      this.$gtag.event('swap', { chain: this.network.name })
+
       console.log('SWAP: ', r)
     },
 
-    onTokenBInput(val) {
-      this.loading = true
-      this.lastField = 'output'
-      this.calcInputDebounced(val)
-    },
-
     onTokenAInput(val) {
+      this.amountB = null
       this.loading = true
       this.lastField = 'input'
       this.calcOutputDebounced(val)
     },
 
-    calcInputDebounced: debounce(function(value) { this.calcInput(value) }, 500),
-    calcOutputDebounced: debounce(function(value) { this.calcOutput(value) }, 500),
+    onTokenBInput(val) {
+      this.amountA = null
+      this.loading = true
+      this.lastField = 'output'
+      this.calcInputDebounced(val)
+    },
+
+    calcInputDebounced: debounce(function(value) {
+      this.calcInput(value)
+    }, 500),
+
+    calcOutputDebounced: debounce(function(value) {
+      this.calcOutput(value)
+    }, 500),
 
     async calcInput(value) {
       try {
         await this.tryCalcInput(value)
       } catch (e) {
+        this.reset({ amountB: this.amountB })
         console.error('calcInput', e)
         const reason = e?.response?.data ? e?.response?.data : e.message
         this.$notify({ type: 'error', title: 'Input Calculation', message: reason })
@@ -470,17 +557,19 @@ export default {
           amount: currencyAmountOut.toFixed(),
           slippage: slippage.toFixed(),
           receiver: this.user?.name,
-          maxHops: this.maxHops
+          maxHops: this.maxHops,
+          //v1: true
         }
       })
 
       const price = new Price(tokenA, tokenB, executionPrice.denominator, executionPrice.numerator)
 
-      this.priceInverted = price.invert().toSignificant(6)
-      this.price = price.toSignificant(6)
+      this.priceInverted = executionPrice.numerator == 0 ? '0' : price.invert().toSignificant(6)
+      this.price = executionPrice.numerator == 0 ? '0' : price.toSignificant(6)
 
       this.memo = memo
       this.amountA = input
+      this.expectedInput = input
       this.expectedOutput = output
       this.priceImpact = priceImpact
       this.route = { pools: route.map(poolId => constructPoolInstance(this.pools.find(p => p.id == poolId))), input: tokenA, output: tokenB }
@@ -491,8 +580,8 @@ export default {
       try {
         await this.tryCalcOutput(value)
       } catch (e) {
+        this.reset({ amountA: this.amountA })
         console.error('calcOutput', e)
-        console.log({ e })
         const reason = e?.response?.data ? e?.response?.data : e.message
         this.$notify({ type: 'error', title: 'Output Calculation', message: reason })
       } finally {
@@ -513,7 +602,7 @@ export default {
       const currencyAmountIn = tryParseCurrencyAmount(value, tokenA)
       if (!currencyAmountIn) return this.amountB = null
 
-      const { data: { executionPrice, minReceived, memo, output, priceImpact, route } } = await this.$axios('/v2/swapRouter/getRoute', {
+      const { data: { executionPrice, minReceived, memo, input, output, priceImpact, route } } = await this.$axios('/v2/swapRouter/getRoute', {
         params: {
           trade_type: 'EXACT_INPUT',
           input: tokenA.id,
@@ -521,22 +610,23 @@ export default {
           amount: currencyAmountIn.toFixed(),
           slippage: slippage.toFixed(),
           receiver: this.user?.name,
-          maxHops: this.maxHops
+          maxHops: this.maxHops,
+          //v1: true
         }
       })
 
       const price = new Price(tokenA, tokenB, executionPrice.denominator, executionPrice.numerator)
 
-      this.priceInverted = price.invert().toSignificant(6)
-      this.price = price.toSignificant(6)
+      this.priceInverted = executionPrice.numerator == 0 ? '0' : price.invert().toSignificant(6)
+      this.price = executionPrice.numerator == 0 ? '0' : price.toSignificant(6)
 
       this.memo = memo
       this.amountB = output
+      this.expectedInput = input
       this.expectedOutput = output
       this.priceImpact = priceImpact
       this.minReceived = minReceived
       this.route = { pools: route.map(poolId => constructPoolInstance(this.pools.find(p => p.id == poolId))), input: tokenA, output: tokenB }
-
     },
 
     onRateClick() {

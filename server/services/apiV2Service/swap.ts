@@ -1,10 +1,11 @@
 import { performance } from 'perf_hooks'
+import JSBI from 'jsbi'
 
 import { Position } from '@alcorexchange/alcor-swap-sdk'
 
 import { Router } from 'express'
 import { cacheSeconds } from 'route-cache'
-import { SwapPool, SwapChartPoint } from '../../models'
+import { Swap, SwapPool, SwapChartPoint } from '../../models'
 import { getPools, getPoolInstance, getRedisTicks } from '../swapV2Service/utils'
 import { getLiquidityRangeChart } from '../../../utils/amm.js'
 import { getPositionStats } from './account'
@@ -32,7 +33,7 @@ function positionIdHandler(req, res, next) {
 swap.get('/pools', async (req, res) => {
   const network: Network = req.app.get('network')
 
-  const pools = await SwapPool.find({ chain: network.name }).lean()
+  const pools = await SwapPool.find({ chain: network.name }).select('-_id -__v').lean()
   res.json(pools)
 })
 
@@ -143,20 +144,20 @@ swap.get('/pools/positions/:id', async (req, res) => {
   res.json({ ...p, ...stats })
 })
 
-swap.get('/pools/:id/positions', async (req, res) => {
+swap.get('/pools/:id/positions', cacheSeconds(60, (req, res) => {
+  return req.originalUrl + '|' + req.app.get('network').name + '|' + req.params.id
+}), async (req, res) => {
   const network: Network = req.app.get('network')
   const redis = req.app.get('redisClient')
 
-  const pool = await getPoolInstance(network.name, req.params.id)
   const positions = JSON.parse(await redis.get(`positions_${network.name}`))
 
-  const result = positions.filter(p => p.pool == req.params.id).map(p => {
-    const position = new Position({ ...p, pool })
-    p.amountA = position.amountA.toAsset()
-    p.amountB = position.amountB.toAsset()
+  const result = []
+  for (const position of positions.filter(p => p.pool == req.params.id)) {
+    const stats = await getPositionStats(network.name, position)
 
-    return p
-  })
+    result.push({ ...position, ...stats })
+  }
 
   res.json(result)
 })
@@ -192,15 +193,49 @@ swap.get('/pools/:id/liquidityChartSeries', async (req, res) => {
   const series = getLiquidityRangeChart(pool, tokenA, tokenB) || []
 
   const result = series.map(s => {
-    const y = Number(s.liquidityActive.toString())
+    const y = s.liquidityActive
 
     return {
-      x: Number(s.price0),
-      y: y > 0 ? y : 0 // TODO This is hotfix, might be bug in calculation
+      x: parseFloat(s.price0),
+      y: parseFloat(y.toString())
     }
-  })
+  }).filter(r => r.y > 0)
 
+  //res.header('Access-Control-Allow-Origin', '*')
   res.json(result)
+})
+
+swap.get('/pools/:id/swaps', async (req, res) => {
+  const network: Network = req.app.get('network')
+
+  const pool = parseInt(req.params.id)
+
+  const { from, to, recipient, sender } = req.query
+
+  const limit = parseInt(req.query.limit as any) || 200
+  const skip = parseInt(req.query.skip as any) || 0
+
+  const q: any = { chain: network.name, pool }
+
+  if (recipient) q.recipient = recipient
+  if (sender) q.sender = sender
+
+  if (from || to) {
+    q.time = {}
+
+    if (from) q.time.$gte = new Date(parseInt(from as any))
+    if (to) q.time.$lte = new Date(parseInt(to as any))
+  }
+
+  console.log(q)
+  const swaps = await Swap.find(q)
+    .select('pool recipient trx_id sender sqrtPriceX64 totalUSDVolume tokenA tokenB time')
+    .sort({ time: 1 })
+    .skip(skip)
+    .limit(limit)
+    .lean()
+
+  res.json(swaps)
 })
 
 const ONEDAY = 60 * 60 * 24 * 1000

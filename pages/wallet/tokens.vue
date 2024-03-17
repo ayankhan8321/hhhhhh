@@ -5,17 +5,21 @@
     el-checkbox() {{ $t('Hide small balances') }}
   virtual-table(:table="virtualTableData")
     template(#row="{ item }")
-      wallet-row(:item="item" :useActions="true" @openDeposit="openDeposit", @openWithdraw="openWithdraw", @trade="trade", @pools="pools")
+      WalletRow(:item="item" :useActions="true" @openDeposit="openDeposit", @openWithdraw="openWithdraw" @openTransfer="openTransfer" @trade="trade", @pools="pools")
 
   DepositPopup(ref="depositPopup")
-  WithdrawPopup(ref="withdrawPopup")
+  WaxUSDTDepositPopup(ref="waxUSDTdepositPopup")
+  WaxUSDTWithdrewPopup(ref="waxUSDTWithdrewPopup")
+  TransferPopup(ref="transferPopup")
 </template>
 
 <script>
 import { mapGetters, mapState } from 'vuex'
 import TokenImage from '@/components/elements/TokenImage'
 import DepositPopup from '@/components/wallet/DepositPopup'
-import WithdrawPopup from '@/components/wallet/WithdrawPopup'
+import WaxUSDTDepositPopup from '@/components/wallet/WaxUSDTDepositPopup'
+import WaxUSDTWithdrewPopup from '@/components/wallet/WaxUSDTWithdrewPopup'
+import TransferPopup from '@/components/wallet/TransferPopup'
 import VirtualTable from '@/components/VirtualTable'
 import WalletRow from '@/components/wallet/WalletRow'
 
@@ -24,16 +28,21 @@ export default {
   components: {
     TokenImage,
     DepositPopup,
-    WithdrawPopup,
+    TransferPopup,
     VirtualTable,
-    WalletRow
+    WalletRow,
+    WaxUSDTDepositPopup,
+    WaxUSDTWithdrewPopup
   },
+
   data: () => ({
     search: ''
   }),
+
   computed: {
     ...mapGetters(['user']),
     ...mapState(['network', 'markets']),
+
     virtualTableData() {
       const header = [
         {
@@ -69,37 +78,50 @@ export default {
 
     balances() {
       if (!this.user) return []
-      if (!this.user.balances) return []
+      //if (!this.user.balances) return []
 
-      return this.user.balances
+      const balances = this.$store.getters['wallet/balances']
         .filter((b) => {
           if (parseFloat(b.amount) == 0) return false
 
           return b.id.toLowerCase().includes(this.search.toLowerCase())
         })
-        .sort((a, b) => {
-          if (a.contract == this.network.baseToken.contract) return -1
 
-          if (a.usd_value > b.usd_value) return -1
-          if (a.usd_value < b.usd_value) return 1
-
-          return 0
+      if (this.network.name == 'wax' && !balances.find(b => b.currency == 'USDT' && b.contract == 'usdt.alcor')) {
+        balances.push({
+          currency: 'USDT',
+          contract: 'usdt.alcor',
+          decimals: 4,
+          amount: 0,
+          id: 'USDT@usdt.alcor',
+          usd_value: 0
         })
+      }
+
+      balances.sort((a, b) => {
+        if (this.network.name == 'wax' && a.contract == 'usdt.alcor') return -2
+        if (a.contract == this.network.baseToken.contract) return -1
+
+        if (a.usd_value > b.usd_value) return -1
+        if (a.usd_value < b.usd_value) return 1
+
+        return 0
+      })
+
+      return balances
     }
   },
 
   methods: {
     pools(token) {
-      this.$router.push({
-        //query: { input: token.id.replace('@', '-') }
-        name: `swap___${this.$i18n.locale}`
-      })
-
-      this.$store.commit('swap/setInput', {
-        contract: token.contract,
-        symbol: token.currency,
-        precision: parseFloat(token.decimals)
-      })
+      this.$router.push(
+        this.localeRoute({
+          path: '/swap',
+          query: {
+            input: `${token.currency}-${token.contract}`,
+          },
+        })
+      )
     },
 
     trade(token) {
@@ -110,12 +132,23 @@ export default {
       )
     },
 
-    openDeposit() {
-      this.$refs.depositPopup.openPopup({})
+    openDeposit(item) {
+      if (this.network.name == 'wax' && item.contract == 'usdt.alcor') {
+        this.$refs.waxUSDTdepositPopup.openPopup({})
+      } else {
+        this.$refs.depositPopup.openPopup({})
+      }
     },
 
     openWithdraw(row) {
-      this.$refs.withdrawPopup.openPopup({
+      if (this.network.name == 'wax' && row.contract == 'usdt.alcor') {
+        this.$refs.waxUSDTWithdrewPopup.openPopup({})
+      }
+    },
+
+    openTransfer(row) {
+      console.log('open transfer')
+      this.$refs.transferPopup.openPopup({
         token: {
           contract: row.contract,
           currency: row.currency,

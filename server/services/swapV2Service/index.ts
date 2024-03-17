@@ -4,14 +4,16 @@ import lodash from 'lodash'
 import mongoose from 'mongoose'
 import { createClient } from 'redis'
 
+import JSBI from "jsbi"
+import { Price, Q128 } from '@alcorexchange/alcor-swap-sdk'
 import { parseAssetPlain, littleEndianToDesimalString } from '../../../utils'
 import { SwapPool, Position, PositionHistory, Swap, SwapChartPoint } from '../../models'
 import { networks } from '../../../config'
 import { fetchAllRows } from '../../../utils/eosjs'
 import { parseToken } from '../../../utils/amm'
 import { updateTokensPrices } from '../updaterService/prices'
-import { getRedisTicks } from './utils'
-import { getSingleEndpointRpc, getFailOverRpc, getTokenPrices } from './../../utils'
+import { getPoolInstance, getRedisTicks, getPoolPriceA, getPoolPriceB } from './utils'
+import { getSingleEndpointRpc, getFailOverRpc, getToken } from './../../utils'
 
 const redis = createClient()
 const publisher = redis.duplicate()
@@ -29,7 +31,7 @@ type TicksList = Map<number, Tick>
 
 // Getting sqrt price fot given time
 export async function getClosestSqrtPrice(chain, pool, time) {
-  const closestSwap = await Swap.findOne({ chain, pool, time: { $lte: new Date(time) } }).sort({ time: 1 }).limit(1).lean()
+  const closestSwap = await Swap.findOne({ chain, pool, time: { $lte: new Date(time) } }).sort({ time: -1 }).limit(1).lean()
 
   if (closestSwap === null) {
     return (await getPool({ chain, id: pool })).sqrtPriceX64
@@ -63,8 +65,8 @@ async function handlePoolChart(
   const poolInstance = await getPool({ chain, id: poolId })
   const { tokenA: { id: tokenA_id }, tokenB: { id: tokenB_id } } = poolInstance
 
-  const tokenAprice = await getTokenPrices(chain, tokenA_id)
-  const tokenBprice = await getTokenPrices(chain, tokenB_id)
+  const tokenAprice = await getToken(chain, tokenA_id)
+  const tokenBprice = await getToken(chain, tokenB_id)
 
   const usdReserveA = reserveA * tokenAprice.usd_price
   const usdReserveB = reserveB * tokenBprice.usd_price
@@ -221,8 +223,27 @@ async function updatePool(chain: string, poolId: number) {
 
   const parsedPool = parsePool(pool)
 
+  // Update tvlUSD
+  const tokenA = await getToken(chain, parsedPool.tokenA.id)
+  const tokenB = await getToken(chain, parsedPool.tokenB.id)
+
+  const tokenAUSDPrice = tokenA?.usd_price || 0
+  const tokenBUSDPrice = tokenB?.usd_price || 0
+
+  const tvlUSD = parsedPool.tokenA.quantity * tokenAUSDPrice + parsedPool.tokenB.quantity * tokenBUSDPrice
+
+  const price = new Price(
+    parseToken(pool.tokenA),
+    parseToken(pool.tokenB),
+    Q128,
+    JSBI.multiply(JSBI.BigInt(parsedPool.sqrtPriceX64), JSBI.BigInt(parsedPool.sqrtPriceX64))
+  )
+
+  const priceA = price.toSignificant()
+  const priceB = price.invert().toSignificant()
+
   // TODO FIX DEPRECATED
-  return await SwapPool.findOneAndUpdate({ chain, id: poolId }, parsedPool, { upsert: true, new: true })
+  return await SwapPool.findOneAndUpdate({ chain, id: poolId }, { ...parsedPool, priceA, priceB, tvlUSD }, { upsert: true, new: true })
 }
 
 async function updateTicks(chain: string, poolId: number) {
@@ -255,8 +276,8 @@ async function updateTicks(chain: string, poolId: number) {
   publisher.publish('swap:ticks:update', push)
 }
 
-async function connectAll() {
-  const uri = `mongodb://${process.env.MONGO_HOST}:${process.env.MONGO_PORT}/alcor_prod_new`
+export async function connectAll() {
+  const uri = `mongodb://${process.env.MONGO_HOST}:${process.env.MONGO_PORT}/${process.env.MONGO_DB}`
   await mongoose.connect(uri, { useUnifiedTopology: true, useNewUrlParser: true, useCreateIndex: true })
 
   // Redis
@@ -274,8 +295,11 @@ async function getChianTicks(chain: string, poolId: number): Promise<TicksList> 
   const rows = await fetchAllRows(rpc, {
     code: network.amm.contract,
     scope: poolId,
-    table: 'ticks'
+    table: 'ticks',
+    bigNumberFix: true
   })
+
+  rows.forEach(i => { i.id = parseFloat(i.id) })
 
   return new Map(rows.map(r => [r.id, r]))
 }
@@ -308,13 +332,32 @@ export async function updatePools(chain) {
 
   for (const pool of pools) {
     if (!current_pools.includes(pool.id)) {
-      to_create.push({ ...parsePool(pool), chain })
+      const parsed_pool = parsePool(pool)
+
+      const price = new Price(
+        parseToken(pool.tokenA),
+        parseToken(pool.tokenB),
+        Q128,
+        JSBI.multiply(JSBI.BigInt(parsed_pool.sqrtPriceX64), JSBI.BigInt(parsed_pool.sqrtPriceX64))
+      )
+
+      const priceA = price.toSignificant()
+      const priceB = price.invert().toSignificant()
+
+      const p = {
+        ...parsed_pool,
+        priceA,
+        priceB,
+        chain
+      }
+
+      to_create.push(p)
     } else {
       await updatePool(chain, pool.id)
     }
   }
 
-  console.log('updated pools for updatePools')
+  console.log('updated pools for ', chain)
   await SwapPool.insertMany(to_create)
 }
 
@@ -330,12 +373,13 @@ export async function initialUpdate(chain: string, poolId?: number) {
 
   const markets = await SwapPool.find({ chain })
 
-  for (const { chain, id } of markets) {
-    await updateTicks(chain, id)
+  //for (const { chain, id } of markets) {
+  //  //await updateTicks(chain, id)
+  //  await updatePool(chain, id)
 
-    // Chain that we have our own nodes
-    //if (!['wax', 'proton'].includes(chain)) await new Promise(resolve => setTimeout(resolve, 1000)) // Sleep for rate limit
-  }
+  //  // Chain that we have our own nodes
+  //  //if (!['wax', 'proton'].includes(chain)) await new Promise(resolve => setTimeout(resolve, 1000)) // Sleep for rate limit
+  //}
 }
 
 async function saveMintOrBurn({ chain, data, type, trx_id, block_time }) {
@@ -349,10 +393,9 @@ async function saveMintOrBurn({ chain, data, type, trx_id, block_time }) {
   if (tokenAamount == 0 && tokenBamount == 0) return undefined
 
   const pool = await getPool({ id: poolId, chain })
-  const tokens = JSON.parse(await redis.get(`${chain}_token_prices`))
 
-  const tokenA = tokens.find(t => t.id == pool.tokenA.id)
-  const tokenB = tokens.find(t => t.id == pool.tokenB.id)
+  const tokenA = await getToken(chain, pool.tokenA.id)
+  const tokenB = await getToken(chain, pool.tokenB.id)
 
   const tokenAUSDPrice = tokenA?.usd_price || 0
   const tokenBUSDPrice = tokenB?.usd_price || 0
@@ -385,10 +428,9 @@ export async function handleSwap({ chain, data, trx_id, block_time }) {
   if (tokenAamount == 0 && tokenBamount == 0) return undefined
 
   const pool = await getPool({ id: poolId, chain })
-  const tokens = JSON.parse(await redis.get(`${chain}_token_prices`))
 
-  const tokenA = tokens.find(t => t.id == pool.tokenA.id)
-  const tokenB = tokens.find(t => t.id == pool.tokenB.id)
+  const tokenA = await getToken(chain, pool.tokenA.id)
+  const tokenB = await getToken(chain, pool.tokenB.id)
 
   const tokenAUSDPrice = tokenA?.usd_price || 0
   const tokenBUSDPrice = tokenB?.usd_price || 0
@@ -489,11 +531,8 @@ export async function onSwapAction(message: string) {
 export async function main() {
   await connectAll()
 
-  // const command = process.argv[2]
-
-  // if (command == 'initial') {
-  //   await initialUpdate(process.argv[3])
-  // }
+  //updatePool('wax', 1095)
+  //updatePositions
 
   subscriber.subscribe('swap_action', message => {
     onSwapAction(message)

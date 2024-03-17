@@ -41,25 +41,27 @@ export const actions = {
       commit('setWallet', new state.wallets[state.lastWallet](rootState.network, this.$rpc))
       dispatch('autoLogin')
     }
+
+    // FIXME For tests
+    if (rootState?.user?.name) dispatch('afterLoginHook')
   },
 
   async autoLogin({ state, rootState, dispatch, commit, getters }) {
-    // TODO Check correct chain
     console.log('try autoLogin..')
     const loginned = await state.wallet.checkLogin()
-    if (loginned) {
-      console.log('YES. autoLogining...')
-      const { name, authorization, chainId } = loginned
-      if (chainId !== rootState.network.chainId) return console.log('autoLogin chain mismatch')
-      commit('setUser', { name, authorization }, { root: true })
-      dispatch('afterLoginHook')
+    if (!loginned) return false
 
-      return true
-    }
-    return false
+    console.log('YES. autoLogining...')
+    const { name, authorization, chainId } = loginned
+    if (chainId !== rootState.network.chainId) return console.log('autoLogin chain mismatch')
+    commit('setUser', { name, authorization }, { root: true })
+    commit('setLastWallet', state.wallet.name)
+    dispatch('afterLoginHook')
+    return true
   },
 
-  afterLoginHook({ dispatch, rootState }) {
+  afterLoginHook({ state, dispatch, rootState }) {
+    this._vm.$gtag.event('login', { wallet: state.lastWallet })
     dispatch('amm/afterLogin', {}, { root: true })
     dispatch('loadAccountData', {}, { root: true })
 
@@ -104,7 +106,7 @@ export const actions = {
 
   logout({ state, dispatch, commit, getters, rootState }) {
     console.log('logout..')
-    state.wallet.logout()
+    state?.wallet?.logout()
     commit('setLastWallet', null)
 
     dispatch('unsubscribeToAccountPushes')
@@ -120,7 +122,7 @@ export const actions = {
       commit('setWallet', wallet)
 
       const wasAutoLoginned = await dispatch('autoLogin')
-      if (wasAutoLoginned) return commit('setLastWallet', wallet.name)
+      if (wasAutoLoginned) return
 
       commit('setUser', { name, authorization }, { root: true })
       dispatch('afterLoginHook')

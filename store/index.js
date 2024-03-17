@@ -9,7 +9,8 @@ export const strict = false
 
 export const state = () => ({
   user: null,
-  //user: { name: 'jamestaggart' },
+  //user: { name: 'unobe.wam' },
+  userBalances: [],
   userDeals: [],
   userOrders: [],
   userOrdersLoading: true,
@@ -57,16 +58,33 @@ export const mutations = {
     else balances.splice(index, 1, { ...balances[index], ...balance })
 
     state.user = { ...state.user, balances }
+
+    // New balances logic
+    state.userBalances = balances
+    // TODO Transit to new userBalances property
   },
 
-  setUser: (state, user) => state.user = user,
+  setUser: (state, user) => {
+    state.user = user
+    if (user?.balances) {
+      state.userBalances = user.balances
+    }
+  },
+
+  setUserBalances: (state, balances) => {
+    if (state.user) state.user.balances = balances
+    state.userBalances = balances
+  },
+
   setMarkets: (state, markets) => {
     state.markets_obj = markets.reduce((obj, item) => Object.assign(obj, { [item.id]: item }), {})
     state.markets = markets
   },
+
   setUserDeals: (state, deals) => state.userDeals = deals,
   setLiquidityPositions: (state, positions) => state.liquidityPositions = positions,
 
+  setIbcTokens: (state, tokens) => state.ibcTokens = tokens,
   setBaseUrl: (state, url) => state.baseUrl = url,
   setLoading: (state, loading) => state.loading = loading,
   setTokens: (state, tokens) => state.tokens = tokens,
@@ -98,7 +116,9 @@ export const actions = {
   //   }
   // },
 
-  init({ dispatch, state, getters }) {
+  init({ dispatch, state, getters, commit }) {
+    dispatch('addIBCTokens')
+
     dispatch('loadAllTokens')
     dispatch('fetchEosAirdropTokens')
 
@@ -155,6 +175,11 @@ export const actions = {
 
   dynamicTheme({ state, commit }, radio_value) {
     this.$colorMode.preference = this.$colorMode.preference !== 'dark' ? 'dark' : radio_value
+  },
+
+  addIBCTokens({ state, commit }) {
+    const wrapTokenContracts = Object.values(state.network?.ibc?.wrapTokenContracts || []).flat(1)
+    commit('setIbcTokens', [...state.ibcTokens, ...wrapTokenContracts])
   },
 
   async fetchEosAirdropTokens({ commit }) {
@@ -216,9 +241,14 @@ export const actions = {
     if (account) commit('setAccountLimits', account)
   },
 
-  async loadAllTokens({ commit }) {
+  async loadAllTokens({ dispatch, commit, state }) {
     const { data: tokens } = await this.$axios.get('/v2/tokens')
     commit('setTokens', tokens)
+
+    const { contract, symbol } = state.network.baseToken
+    const system_token = tokens.find(t => t.contract == contract && t.symbol == symbol)
+
+    commit('wallet/setSystemPrice', system_token.usd_price, { root: true })
   },
 
   async loadMarkets({ state, commit, getters, dispatch }) {
@@ -246,8 +276,10 @@ export const actions = {
     if (!state.user || !state.user.name) return
 
     try {
-      const sellOrdersMarkets = state.accountLimits.sellorders.map(o => o.key)
-      const buyOrdersMarkets = state.accountLimits.buyorders.map(o => o.key)
+      const sellOrders = state.accountLimits.sellorders
+      const buyOrders = state.accountLimits.buyorders
+      const sellOrdersMarkets = Array.isArray(sellOrders) ? sellOrders.map(o => o.key) : []
+      const buyOrdersMarkets = Array.isArray(buyOrders) ? buyOrders.map(o => o.key) : []
 
       const markets = new Set([...sellOrdersMarkets, ...buyOrdersMarkets])
 
@@ -294,7 +326,6 @@ export const actions = {
         o.market_id = market_id
       })
 
-
       // TODO Need optimization so much!
       commit('setUserOrders', state.userOrders.filter(o => o.market_id != market_id).concat(buyOrders.concat(sellOrders)))
     }).catch(e => console.log(e))
@@ -305,7 +336,6 @@ export const actions = {
 
     const balance = await this.$rpc.get_currency_balance(contract, state.user.name, symbol)
     if (!balance[0]) return
-
 
     const asset = parseAsset(balance[0])
 
@@ -381,30 +411,37 @@ export const actions = {
       return token
     })
   },
-  async loadUserBalancesLightAPI({ state, rootState, commit }) {
-    if (state.user) {
-      //this.$axios.get(`${state.network.lightapi}/api/balances/${state.network.name}/${rootState.user.name}`).then((r) => {
-      // FIXME Почему то нукстовский аксиос не работает для телефонов
-      const r = await axios.get(`${state.network.lightapi}/api/balances/${state.network.name}/${state.user.name}`)
 
-      // Check sync is correct
-      const block_time = new Date(r.data.chain.block_time + ' UTC')
-      const diff = (new Date().getTime() - block_time.getTime()) / 1000
+  async loadUserBalancesLightAPI({ state, commit }) {
+    if (!state.user) return
 
-      if (diff > 60) throw new Error('LightAPI sync is more the one minute out.')
+    try {
+      const response = await axios.get(`${state.network.lightapi}/api/balances/${state.network.name}/${state.user.name}`)
+      const data = response.data
+      const blockTime = new Date(data.chain.block_time + ' UTC')
+      const timeDiff = (new Date().getTime() - blockTime.getTime()) / 1000
 
-      const balances = r.data.balances.filter(b => parseFloat(b.amount) > 0)
-      commit('setLihgHistoryBlock', r.data.chain.block_num)
+      if (timeDiff > 60) {
+        throw new Error('LightAPI sync is more than one minute out.')
+      }
 
-      // TODO Refactor this and make separate filter/computed for getting token in USD
-      // Calc USD value
-      balances.map(token => {
-        token.id = token.currency + '@' + token.contract
-        const price = state.tokens.find(t => t.id == token.id.replace('@', '-').toLowerCase())?.usd_price || 0
+      if (Array.isArray(data.balances)) {
+        const balances = data.balances.filter(b => parseFloat(b.amount) > 0)
 
-        token.usd_value = parseFloat(token.amount) * price
-        commit('updateBalance', token)
-      })
+        balances.forEach(token => {
+          token.id = `${token.currency}@${token.contract}`
+          const tokenKey = token.id.replace('@', '-').toLowerCase()
+          const price = state.tokens.find(t => t.id === tokenKey)?.usd_price || 0
+
+          token.usd_value = parseFloat(token.amount) * price
+        })
+
+        commit('setLihgHistoryBlock', data.chain.block_num)
+        commit('setUserBalances', balances)
+      }
+    } catch (error) {
+      console.error('Error loading user balances:', error)
+      // Обработка ошибок или диспетчеризация действий обработки ошибок
     }
   },
 

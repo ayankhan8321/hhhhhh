@@ -8,7 +8,7 @@ recycle-scroller(
   :item-size="table.itemSize"
   :pageMode="table.pageMode"
   :buffer="buffer || 450"
-  list-tag="table"
+  list-tag="div"
 )
   template(#before)
     div.header(:class="{ 'mobile': isMobile }")
@@ -25,8 +25,9 @@ import Sorter from '~/components/Sorter'
 
 export default {
   components: { Sorter, RecycleScroller },
-  props: ['table', 'buffer'],
+  props: ['table', 'buffer', 'defaultSortKey'],
   data: () => ({ sortKey: null, route: 1 }),
+
   computed: {
     sortedData() {
       if (!this.sortKey) return this.table.data
@@ -36,10 +37,14 @@ export default {
     },
     activeSort() {
       return { key: this.sortKey, route: this.route }
-    }
+    },
+  },
+  mounted() {
+    if (this.defaultSortKey) this.sort({ key: this.defaultSortKey, route: 0 })
   },
   methods: {
     sort(updated) {
+      console.log('updated', updated.key)
       if (this.sortKey == updated.key && this.route == updated.route) {
         this.sortKey = null
         this.route = null
@@ -47,8 +52,8 @@ export default {
       }
       this.sortKey = updated.key
       this.route = updated.route
-    }
-  }
+    },
+  },
 }
 </script>
 

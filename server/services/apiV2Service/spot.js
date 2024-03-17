@@ -2,7 +2,8 @@ import { Router } from 'express'
 import { cacheSeconds } from 'route-cache'
 import { write_decimal } from 'eos-common'
 
-import { Bar, Match, Market } from '../../models'
+import { SwapPool, Bar, Match, Market } from '../../models'
+import { getTokens } from '../../utils'
 
 const depthHandler = (req, res, next) => {
   if (req.query.depth && isNaN(parseInt(req.query.depth))) return res.status(403).send('Invalid depth')
@@ -33,12 +34,18 @@ function formatToken(token) {
   }
 }
 
-function formatTicker(m) {
+function formatTicker(m, tokens = []) {
   const [base, target] = m.ticker_id.split('_')
 
   m.market_id = m.id
   m.target_currency = target.toLowerCase()
   m.base_currency = base.toLowerCase()
+
+  const target_token = tokens.find(t => t.id == m.target_currency)
+  const base_token = tokens.find(t => t.id == m.base_currency)
+
+  m.target_cmc_ucid = target_token?.cmc_id || null
+  m.base_cmc_ucid = base_token?.cmc_id || null
 
   delete m.id
 }
@@ -68,18 +75,49 @@ spot.get('/pairs', cacheSeconds(60, (req, res) => {
   res.json(pairs)
 })
 
+// Tickers with merged volumes from pools
 spot.get('/tickers', cacheSeconds(60, (req, res) => {
   return req.originalUrl + '|' + req.app.get('network').name
 }), async (req, res) => {
   const network = req.app.get('network')
+  const { merge_volume } = req.query
+
+  console.log({ merge_volume })
+
+  const tokens = await getTokens(network.name)
+
+  const pools = await SwapPool.find({ chain: network.name }).select('-_id -__v').lean()
 
   const markets = await Market.find({ chain: network.name })
     .select('-_id -__v -chain -quote_token -base_token -changeWeek -volume24 -volumeMonth -volumeWeek').lean()
 
-  markets.map(m => formatTicker(m))
+  markets.forEach(m => {
+    formatTicker(m, tokens)
+
+    const market_pools = pools.filter(p => {
+      return (
+        (p.tokenA.id == m.target_currency) && (p.tokenB.id == m.base_currency)
+      ) || (
+        (p.tokenA.id == m.base_currency) && (p.tokenB.id == m.target_currency)
+      )
+    })
+
+    market_pools.forEach(p => {
+      if (p.tokenA.id == m.target_currency && p.tokenB.id == m.base_currency) {
+        m.target_volume += p.volumeA24
+        m.base_volume += p.volumeB24
+      }
+
+      if (p.tokenA.id == m.base_currency && p.tokenB.id == m.target_currency) {
+        m.base_volume += p.volumeA24
+        m.target_volume += p.volumeB24
+      }
+    })
+  })
 
   res.json(markets)
 })
+
 
 spot.get('/tickers/:ticker_id', tickerHandler, cacheSeconds(1, (req, res) => {
   return req.originalUrl + '|' + req.app.get('network').name
@@ -87,10 +125,11 @@ spot.get('/tickers/:ticker_id', tickerHandler, cacheSeconds(1, (req, res) => {
   const network = req.app.get('network')
 
   const { ticker_id } = req.params
+  const tokens = await getTokens(network.name)
   const m = await Market.findOne({ ticker_id, chain: network.name })
     .select('-_id -__v -chain -quote_token -base_token -changeWeek -volume24 -volumeMonth -volumeWeek').lean()
 
-  formatTicker(m)
+  formatTicker(m, tokens)
 
   res.json(m)
 })
@@ -169,7 +208,6 @@ spot.get('/tickers/:ticker_id/historical_trades', tickerHandler, cacheSeconds(1,
     q.time = {}
 
     if (from) q.time.$gte = new Date(parseInt(from))
-    if (to) q.time.$lte = new Date(parseInt(to))
     if (to) q.time.$lte = new Date(parseInt(to))
   }
 

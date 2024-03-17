@@ -1,9 +1,20 @@
 import { Pool, Token } from '@alcorexchange/alcor-swap-sdk'
 
+import { Big } from 'big.js'
 import { createClient } from 'redis'
 import { SwapPool } from '../../models'
 
 const redis = createClient()
+
+export function getPoolPriceA(sqrtPriceX64, precisionA, precisionB) {
+  // console.log(sqrtPriceX64, precisionA, precisionB)
+  // console.log(Big(sqrtPriceX64).pow(2).toString(), Big(2).pow(128).times(10).toString())
+  return Big(sqrtPriceX64).pow(2).div(Big(2).pow(128).times(10).pow(precisionA - precisionB)).toString()
+}
+
+export function getPoolPriceB(sqrtPriceX64, precisionA, precisionB) {
+  return Big(2).pow(128).div(Big(sqrtPriceX64).pow(2).times(10).pow(precisionB - precisionA)).toString()
+}
 
 export async function getPoolInstance(chain: string, id): Promise<Pool> {
   // Based on swap only, right now
@@ -17,25 +28,24 @@ export async function getPoolInstance(chain: string, id): Promise<Pool> {
 
   return new Pool({
     ...pool,
-    tokenA: new Token(tokenA.contract, tokenA.decimals, tokenA.symbol, tokenA.symbol.toLowerCase() + '-' + tokenA.contract),
-    tokenB: new Token(tokenB.contract, tokenB.decimals, tokenB.symbol, tokenB.symbol.toLowerCase() + '-' + tokenB.contract),
+    tokenA: new Token(tokenA.contract, tokenA.decimals, tokenA.symbol),
+    tokenB: new Token(tokenB.contract, tokenB.decimals, tokenB.symbol),
     tickCurrent: pool.tick,
     ticks
   })
 }
 
-export async function getPools(chain: string, fetchTicks = true) {
-  // Based on swap only, right now
+export async function getPools(chain: string, fetchTicks = true, filterFunc = (p: any) => true) {
   const mongoPools = await SwapPool.find({ chain }).lean()
 
   const pools = []
-  for (const p of mongoPools) {
+  for (const p of mongoPools.filter(filterFunc)) {
     const ticks = fetchTicks ? await getRedisTicks(chain, p.id) : []
 
     pools.push(new Pool({
       ...p,
-      tokenA: new Token(p.tokenA.contract, p.tokenA.decimals, p.tokenA.symbol, p.tokenA.id),
-      tokenB: new Token(p.tokenB.contract, p.tokenB.decimals, p.tokenB.symbol, p.tokenB.id),
+      tokenA: new Token(p.tokenA.contract, p.tokenA.decimals, p.tokenA.symbol),
+      tokenB: new Token(p.tokenB.contract, p.tokenB.decimals, p.tokenB.symbol),
 
       ticks: Array.from(ticks.values()).sort((a, b) => a.id - b.id),
       tickCurrent: p.tick

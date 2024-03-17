@@ -14,6 +14,7 @@ axiosRetry(axios, { retries: 3 })
 import { networkResolver } from '../apiService/middleware'
 import { spot } from './spot'
 import { swap } from './swap'
+import { ibc } from './ibc'
 import { tokens } from './tokens'
 import { account } from './account'
 import { swapRouter } from './swapRouter'
@@ -26,7 +27,7 @@ async function start () {
   //db sync
   if (!process.env.DISABLE_DB) {
     try {
-      const uri = `mongodb://${process.env.MONGO_HOST}:${process.env.MONGO_PORT}/alcor_prod_new`
+      const uri = `mongodb://${process.env.MONGO_HOST}:${process.env.MONGO_PORT}/${process.env.MONGO_DB}`
       await mongoose.connect(uri, { useUnifiedTopology: true, useNewUrlParser: true })
       console.log('MongoDB connected!')
     } catch (e) {
@@ -49,6 +50,7 @@ async function start () {
   // Server routes
   app.use('/api/v2/', spot)
   app.use('/api/v2/', tokens)
+  app.use('/api/v2/ibc', ibc)
   app.use('/api/v2/analytics', analytics)
   app.use('/api/v2/swap', swap)
   app.use('/api/v2/swapRouter', swapRouter)

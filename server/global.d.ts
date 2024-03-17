@@ -5,7 +5,10 @@ declare global {
       symbol: string,
       contract: string,
       precision: number
-    }
+    },
+    CMC_UCIDS: string[],
+    client_nodes: string[],
+    USD_TOKEN: string,
   }
 }
 export {}

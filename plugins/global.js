@@ -16,6 +16,7 @@ export default ({ app: { store: { state, commit }, $axios }, req }, inject) => {
     const subdomain = process.env.NETWORK + '.'
 
     commit('setBaseUrl', `https://${subdomain}alcor.exchange`)
+    // commit('setBaseUrl', `https://dev.alcor.exchange`)
     commit('setNetwork', config.networks[process.env.NETWORK])
   } else if (process.server) {
     const protocol = process.env.isDev ? 'http' : 'https'

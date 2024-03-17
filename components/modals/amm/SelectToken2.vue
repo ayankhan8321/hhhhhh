@@ -64,7 +64,7 @@
               .d-flex.flex-column.gap-2.flex-grow-1
                 .contrast {{ item.currency || item.symbol }}
                 .fs-12.disable {{ item.contract }}
-              div {{ item.balance }}
+              div {{ item.balance | commaFloat(4) }}
 
         .fs-16.text-center(v-if="!filteredAssets.length") {{ $t('No tokens found') }}
 
@@ -105,11 +105,18 @@ export default {
     },
 
     filteredAssets() {
-      const tokens = this.tokens
+      const tokens = [...this.tokens || []]
 
       if (!tokens) return []
 
       tokens.forEach(t => t.balance = this.$tokenBalance(t.currency || t.symbol, t.contract))
+
+      // TODO ID are broken here
+      // tokens.forEach(t => {
+      //   t.id = (t.currency ?? t.symbol) + '-' + t.contract
+      //   t.balance = this.$tokenBalance(t.currency ?? t.symbol, t.contract)
+      // })
+
       tokens.sort((a, b) => parseFloat(b.balance) - parseFloat(a.balance))
 
       return tokens?.filter((asset) =>
@@ -125,11 +132,10 @@ export default {
       if (this.locked) return
       this.visible = true
       this.$nextTick(() => {
-        this.$refs.searchInput.focus()
+        this.$refs.searchInput?.focus()
       })
     },
     selectAsset(v) {
-      console.log('selectAsset', v)
       this.$emit('selected', v)
       this.visible = false
     },
@@ -202,8 +208,13 @@ export default {
       align-items: center;
       padding: 4px 8px 4px 6px;
       border-radius: 14px;
+      transition: all 0.4s;
       &.is-selected {
-        border-color: var(--main-action-green);
+        border-color: var(--main-action-green) !important;
+      }
+      &:hover {
+        border-color: var(--main-green) !important;
+        background: var(--hover);
       }
     }
   }

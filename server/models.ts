@@ -203,6 +203,8 @@ const SwapPoolSchema = new mongoose.Schema({
   },
 
   sqrtPriceX64: { type: String },
+  priceA: { type: Number },
+  priceB: { type: Number },
   tick: { type: Number },
 
   feeProtocol: { type: Number, index: true },
@@ -218,8 +220,9 @@ const SwapPoolSchema = new mongoose.Schema({
   liquidity: { type: String },
   creator: { type: String },
 
+  tvlUSD: { type: Number, index: true },
+
   // TODO Change 24/week/month
-  // TODO TVL
 
   // New Fields
   volumeA24: { type: Number, default: 0 },
@@ -235,10 +238,10 @@ const SwapPoolSchema = new mongoose.Schema({
   volumeUSDWeek: { type: Number, default: 0 },
   volumeUSDMonth: { type: Number, default: 0 },
 
-  // change24: { type: Number },
-  // changeWeek: { type: Number },
-  // high24: { type: Number },
-  // low24: { type: Number }
+  change24: { type: Number, default: 0 },
+  changeWeek: { type: Number, default: 0 },
+  high24: { type: Number, default: 0 },
+  low24: { type: Number, default: 0 }
 })
 SwapPoolSchema.index({ chain: 1, id: 1 }, { unique: true })
 
@@ -282,6 +285,12 @@ const SwapSchema = new mongoose.Schema({
 
   time: { type: Date, index: true },
 })
+SwapSchema.index({ recipient: 1 }, { background: true })
+SwapSchema.index({ sender: 1 }, { background: true })
+SwapSchema.index({ chain: 1, pool: 1, recipient: 1 }, { background: true })
+SwapSchema.index({ chain: 1, pool: 1, sender: 1 }, { background: true })
+SwapSchema.index({ chain: 1, pool: 1 }, { background: true })
+SwapSchema.index({ chain: 1, pool: 1, time: -1 }, { background: true })
 
 const PositionSchema = new mongoose.Schema({
   id: { type: Number },

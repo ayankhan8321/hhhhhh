@@ -1,5 +1,6 @@
 <template lang="pug">
-nav.nav(v-if='!isMobile')
+LayoutMenu(v-if="!isMobile")
+//nav.nav(v-if='!isMobile')
   .nav-side.nav-left
     nuxt-link(:to='localePath("index", $i18n.locale)')
       img.logo(
@@ -77,6 +78,7 @@ nav.nav(v-if='!isMobile')
 import AlcorButton from '~/components/AlcorButton'
 import AlcorLink from '~/components/AlcorLink'
 import ConnectNav from '~/components/layout/ConnectNav'
+import LayoutMenu from '~/components/layout/LayoutMenu'
 import ChainSelect from '~/components/elements/ChainSelect'
 import Settings from '~/components/layout/Settings'
 import NewBadge from '~/components/svg-icons/NewBadge.vue'
@@ -89,6 +91,7 @@ export default {
     ChainSelect,
     Settings,
     NewBadge,
+    LayoutMenu,
   },
 
   data() {
@@ -102,13 +105,15 @@ export default {
     menuItems() {
       const items = []
 
-      if (['wax', 'eos', 'telos', 'proton'].includes(this.$store.state.network.name)) {
-        items.push({ index: '/swap', name: 'Swap', new: true })
-        items.push({ index: '/positions', name: 'Pool' })
-      }
+      items.push({ index: '/swap', name: 'Swap' })
+      items.push({ index: '/positions', name: 'Pool' })
 
-      items.push({ index: '/markets', name: 'Markets' })
+      items.push({ index: '/markets', name: 'Spot' })
       items.push({ index: '/bridge', name: 'Bridge' })
+
+      if (['wax', 'eos', 'proton'].includes(this.$store.state.network.name)) {
+        items.push({ index: '/farm', name: 'Farm', new: true })
+      }
 
       items.push({ index: '/otc', name: 'OTC' })
 
@@ -118,7 +123,12 @@ export default {
       }
 
       items.push({ index: '/wallet', name: 'Wallet' })
-      //items.push({ index: '/buy-crypto', name: 'Buy Crypto' })
+
+      if (['wax', 'eos', 'proton', 'telos'].includes(this.$store.state.network.name)) {
+        items.push({ index: '/buy-crypto', name: 'Cross Chain' })
+      }
+
+      items.push({ index: '/analytics', name: 'Analytics' })
       items.push({ index: '/docs', name: 'Docs' })
 
       return items
@@ -144,6 +154,8 @@ export default {
       if (path.includes('trade') || path.includes('/market')) {
         return index == '/markets'
       }
+
+      if (path.includes('/wallet/farms')) return index == '/wallet/farms'
 
       return path.includes(index)
     },
@@ -199,7 +211,7 @@ export default {
 
   .nav-left {
     width: 100%;
-    max-width: 700px;
+    max-width: 60%;
   }
 
   @media only screen and (max-width: 1300px) {
@@ -235,7 +247,7 @@ export default {
     color: var(--text-disable);
     position: relative;
     &:hover {
-      color: var(--text-default)
+      color: var(--text-default);
     }
 
     .badge {

@@ -14,7 +14,7 @@ div
         token-image.token-image(:src="$tokenLogo(position.pool.tokenA.symbol, position.pool.tokenA.contract)" height="25")
         span {{ position.pool.tokenA.symbol }}
       .d-flex.align-items-center.gap-8
-        .fs-18 {{ amountA }}
+        .fs-18 {{ amountA | commaFloat(position.pool.tokenA.decimals) }}
         .fs-14.color-action (${{ $tokenToUSD(amountA, position.pool.tokenA.symbol, position.pool.tokenA.contract) }})
 
     .d-flex.justify-content-between.mt-1
@@ -22,7 +22,7 @@ div
         token-image.token-image(:src="$tokenLogo(position.pool.tokenB.symbol, position.pool.tokenB.contract)" height="25")
         span {{ position.pool.tokenB.symbol }}
       .d-flex.align-items-center.gap-8
-        .fs-18 {{ amountB }}
+        .fs-18 {{ amountB | commaFloat(position.pool.tokenB.decimals) }}
         .fs-14.color-action (${{ $tokenToUSD(amountB, position.pool.tokenB.symbol, position.pool.tokenB.contract) }})
 
   AlcorButton.claim-fees-button.submit.w-100.mt-2(access @click="submit") {{ $t('Remove Liquidity and Claim Fees') }}
@@ -87,6 +87,9 @@ export default {
     async submit() {
       try {
         await this.remove()
+
+        setTimeout(() => this.$store.dispatch('farms/updateStakesAfterAction'), 500)
+
         if (this.percent == 100) this.$router.push('/positions')
 
         // setTimeout(() => {

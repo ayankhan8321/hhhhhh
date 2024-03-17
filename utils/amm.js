@@ -2,7 +2,7 @@
 import JSBI from 'jsbi'
 import { parseUnits } from '@ethersproject/units'
 
-import { Pool, Token, Price, TickMath, encodeSqrtRatioX64, priceToClosestTick, nearestUsableTick, TICK_SPACINGS, CurrencyAmount, tickToPrice } from '@alcorexchange/alcor-swap-sdk'
+import { Pool, Position, Token, Price, TickMath, encodeSqrtRatioX64, priceToClosestTick, nearestUsableTick, TICK_SPACINGS, CurrencyAmount, tickToPrice } from '@alcorexchange/alcor-swap-sdk'
 
 const PRICE_FIXED_DIGITS = 8
 
@@ -15,8 +15,7 @@ export function parseToken(token) {
   return new Token(
     token.contract,
     precision,
-    symbol,
-    (symbol + '-' + token.contract).toLowerCase()
+    symbol
   )
 }
 
@@ -146,7 +145,6 @@ export function isPriceInvalid(price) {
 const getActiveTick = (tickCurrent, feeAmount) =>
   tickCurrent && feeAmount ? Math.floor(tickCurrent / TICK_SPACINGS[feeAmount]) * TICK_SPACINGS[feeAmount] : undefined
 
-
 export function getLiquidityRangeChart(pool, tokenA, tokenB) {
   // Find nearest valid tick for pool in case tick is not initialized.
   const activeTick = getActiveTick(pool.tickCurrent, pool.fee)
@@ -253,4 +251,64 @@ export function constructPoolInstance(row) {
     sqrtPriceX64,
     tickCurrent: tick,
   })
+}
+
+export function constructPosition(pool, position) {
+  const tempPosition = new Position({
+    ...position,
+    pool,
+
+    // Because we have feesA as asset here from backend api
+    feesA: 0,
+    feesB: 0
+  })
+
+  // Add Stats
+  Object.assign(tempPosition, {
+    feesA: position.feesA ?? '0.0000',
+    feesB: position.feesB ?? '0.0000',
+    pNl: position.pNl ?? 0,
+    totalValue: position.totalValue ?? 0
+  })
+
+  return tempPosition
+}
+
+export function getCollectActions(network, user, position) {
+  const { tokenA, tokenB } = position.pool
+  const { owner, tickLower, tickUpper } = position
+
+  const tokenAZero = Number(0).toFixed(tokenA.decimals) + ' ' + tokenA.symbol
+  const tokenBZero = Number(0).toFixed(tokenB.decimals) + ' ' + tokenB.symbol
+
+  const actions = [{
+    account: network.amm.contract,
+    name: 'subliquid',
+    authorization: [user.authorization],
+    data: {
+      poolId: position.pool.id,
+      owner,
+      liquidity: 0,
+      tickLower,
+      tickUpper,
+      tokenAMin: tokenAZero,
+      tokenBMin: tokenBZero,
+      deadline: 0
+    }
+  }, {
+    account: network.amm.contract,
+    name: 'collect',
+    authorization: [user.authorization],
+    data: {
+      poolId: position.pool.id,
+      owner,
+      recipient: owner,
+      tickLower,
+      tickUpper,
+      tokenAMax: tokenAZero,
+      tokenBMax: tokenBZero,
+    }
+  }]
+
+  return actions
 }

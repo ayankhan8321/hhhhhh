@@ -9,7 +9,7 @@ import { updateGlobalStats } from './analytics'
 import { newPoolsAction } from './pools'
 import { updateMarkets, newMatch } from './markets'
 import { newSwapAction, updatePoolsStats } from './swap'
-import { updateSystemPrice, updateTokensPrices } from './prices'
+import { updateCMSucid, updateSystemPrice, updateTokensPrices } from './prices'
 
 import { streamHyperion, streamByNode } from './streamers'
 
@@ -21,7 +21,7 @@ const providers = {
 export function startUpdaters() {
   if (process.env.NETWORK) {
     console.log('NETWORK=', process.env.NETWORK)
-    updater(process.env.NETWORK, 'node', ['swap', 'markets'])
+    updater(process.env.NETWORK, 'node', ['swap', 'prices'])
   } else {
     updater('eos', 'node', ['markets', 'prices', 'swap'])
     updater('wax', 'node', ['markets', 'prices', 'swap'])
@@ -44,14 +44,19 @@ export async function updater(chain, provider, services) {
   await getSettings(network)
 
   // TODO Remove after test
-  await updateGlobalStats(network)
+  try {
+    await updateGlobalStats(network)
+  } catch (e) {
+    console.log('GlobalStats err', e)
+  }
 
-  schedule.scheduleJob('0 0 * * *', () => updateGlobalStats(network))
+  schedule.scheduleJob('58 23 * * *', () => updateGlobalStats(network))
 
   if (services.includes('prices')) {
     console.log('Start price updater for', chain)
 
-    await updateSystemPrice(network)
+    await Promise.all([updateSystemPrice(network), updateCMSucid()])
+
     updateTokensPrices(network)
 
     setInterval(() => updateSystemPrice(network), 1 * 60 * 1000)
@@ -82,7 +87,7 @@ export async function updater(chain, provider, services) {
     await updatePoolsStats(chain)
     setInterval(() => updatePoolsStats(chain), 1 * 60 * 1000)
 
-    streamer(network, network.amm.contract, newSwapAction, ['logmint', 'logswap', 'logburn', 'logpool', 'logcollect'])
+    streamer(network, network.amm.contract, newSwapAction, ['logmint', 'logswap', 'logburn', 'logpool', 'logcollect'], 300)
       .catch(e => { console.log(`${network.name} (${network.amm.contract}) Updater Error!`, e); process.exit(1) })
   }
 }

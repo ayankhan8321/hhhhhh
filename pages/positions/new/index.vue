@@ -4,6 +4,12 @@
 .row.justify-content-center
   AlcorContainer.add-liquidity-component.w-100
     PageHeader(title="Add Liquidity")
+      template(#afterTitile)
+        el-popover(placement='bottom-start' width='300' trigger='hover')
+          template
+            .text
+              p Click to see FAQ Page.
+          .el-icon-info(slot="reference" @click="openInNewTab('https://docs.alcor.exchange/alcor-swap/liquidity-provider-faq')").ml-2.pointer
     .main-section.mt-2
       //- 1 start
       .section-1
@@ -63,9 +69,10 @@
             :priceLower="priceLower"
             :priceUpper="priceUpper"
             :ticksAtLimit="ticksAtLimit"
-            :price="price ? parseFloat((invertPrice ? price.invert() : price).toSignificant(6)) : undefined"
+            :price="price ? (invertPrice ? price.invert() : price).toSignificant(6) : undefined"
             @onLeftRangeInput="onLeftRangeInput"
             @onRightRangeInput="onRightRangeInput"
+            @onPreDefinedRangeSelect="onPreDefinedRangeSelect"
             :chartTitle="$t('Set Price Range')"
             :interactive="true")
 
@@ -79,11 +86,15 @@
               )
 
         .pre-defined-ranges.mt-2(v-mutted="!price")
-          AlcorButton.item(bordered v-for="range in priceRangeItems" @click="onPreDefinedRangeSelect(range)") {{ range.text }}
+          AlcorButton.item(
+            v-for="range in priceRangeItems" @click="onPreDefinedRangeSelect(range)"
+            :bordered="!isIninityRange || range.higherValue != 'infinity'"
+            :outline="isIninityRange && range.higherValue == 'infinity'"
+            ) {{ range.text }}
 
         PositionFeeAndShare(:positionLiquidity="positionLiquidity" :pool="pool").mt-3.mb-3
 
-        .min-max-price.d-flex.gap-8.mt-2.justify-content-center
+        .min-max-price.d-flex.gap-8.mt-2.justify-content-center(v-mutted="isIninityRange")
           InputStepCounter(
             :value="leftRangeValue"
             @change="onLeftRangeInput"
@@ -95,7 +106,7 @@
             template(#top) {{ $t('Min Price') }}
             template
               .pair-names.mb-1(v-if="tokenA && tokenB") {{ tokenB.symbol }} per {{ tokenA.symbol }}
-              .info.disable(v-if="tokenA") Your position will be {{ getTokenComposedPercent('w') }}% composed of {{ tokenA.symbol }} at this price
+              .info.disable(v-if="tokenA") Your position will be 100% composed of {{ tokenA.symbol }} at this price
 
           InputStepCounter(
             :value="rightRangeValue"
@@ -107,8 +118,8 @@
           )
             template(#top) {{ $t('Max Price') }}
             template
-              .pair-names.mb-1(v-if="tokenA && tokenB") {{tokenB.symbol}} per {{tokenA.symbol}}
-              .info.disable(v-if="tokenB") Your position will be {{ getTokenComposedPercent('e') }}% composed of {{tokenB.symbol}} at this price
+              .pair-names.mb-1(v-if="tokenA && tokenB") {{tokenB.symbol}} per {{ tokenA.symbol }}
+              .info.disable(v-if="tokenB") Your position will be 100% composed of {{ tokenB.symbol }} at this price
       .section-5
         .error-container(v-if="renderError" :class="renderError.colorClass")
           i.el-icon-warning-outline.fs-24
@@ -205,8 +216,8 @@ export default {
         { text: 'Inifinity Range', higherValue: 'infinity', lowerValue: 'infinity' },
         { text: '+/-5%', lowerValue: -5, higherValue: 5 },
         { text: '+/-30%', lowerValue: -30, higherValue: 30 },
-        { text: '-2%/+10', lowerValue: -2, higherValue: 10 },
-        { text: '-10%/+2', lowerValue: -10, higherValue: 2 },
+        { text: '-10%/+50%', lowerValue: -10, higherValue: 50 },
+        { text: '-50%/+10%', lowerValue: -50, higherValue: 10 },
 
         // 500
         // { text: 'Inifinity Range', higherValue: 'infinity', lowerValue: 'infinity' },
@@ -218,7 +229,9 @@ export default {
         return { ...item, value: `${item.higherValue}-${item.lowerValue}` }
       }),
 
-      positionLiquidity: '0'
+      positionLiquidity: '0',
+
+      defaultFeeSetted: false
     }
   },
 
@@ -236,6 +249,12 @@ export default {
       'sortedB',
       'currnetPools',
     ]),
+
+    isIninityRange() {
+      const { ticksAtLimit } = this
+
+      return ticksAtLimit.LOWER && this.ticksAtLimit.UPPER
+    },
 
     existingPosition() {
       const { positions, tickLower, tickUpper, pool } = this
@@ -504,32 +523,6 @@ export default {
       this.feeAmount = fee
     },
 
-    getTokenComposedPercent(side) {
-      const { invalidRange, isSorted, tickLower, tickUpper } = this
-
-      if (isNaN(tickLower) || isNaN(tickUpper) || !this.mockPool || invalidRange) return
-
-      const position = Position.fromAmountA({
-        pool: this.mockPool,
-        tickLower,
-        tickUpper,
-        amountA: 1000000
-      })
-
-      const amountA = parseFloat(position.amountA.toFixed())
-      const amountB = parseFloat(position.amountB.toFixed())
-
-      const total = amountA + amountB
-
-      if (total == 0) return
-
-      const aPercent = ((100 * amountA) / total).toFixed(0)
-      const bPercent = ((100 * amountB) / total).toFixed(0)
-
-      if (side == 'w') return isSorted ? aPercent : bPercent
-      if (side == 'e') return isSorted ? bPercent : aPercent
-    },
-
     toggleTokens() {
       const { invertPrice, ticksAtLimit, priceLower, priceUpper } = this
 
@@ -639,10 +632,12 @@ export default {
     },
 
     setTokenA(token) {
+      this.defaultFeeSetted = false
       this.$store.dispatch('amm/liquidity/setTokenA', token)
     },
 
     setTokenB(token) {
+      this.defaultFeeSetted = false
       this.$store.dispatch('amm/liquidity/setTokenB', token)
     },
 
@@ -693,7 +688,7 @@ export default {
             fee: this.feeAmount
           }
         })
-        const creationFee = this.network.amm?.creationFee || this.network.marketCreationFee
+        const creationFee = this.network.amm?.creationFee
 
         // Fetch last pool just to predict new created pool id
         try {
@@ -710,7 +705,7 @@ export default {
           return this.$notify({ title: 'Position Create', message: 'Fetch new pool ID error: ' + e.message, type: 'error' })
         }
 
-        if (this.network.name == 'wax') {
+        if (parseFloat(creationFee) > 0) {
           try {
             await this.$confirm('Fee is: ' + creationFee + ' Continue?', 'New pool creation fee', {
               confirmButtonText: 'OK',
@@ -782,14 +777,23 @@ export default {
         }
       )
 
+      if (!this.existingPosition && !this.outOfRange) {
+        const incentives = this.$store.state.farms.incentives.filter(i => i.poolId == poolId && !i.isFinished)
+
+        for (const incentive of incentives) {
+          actions.push({
+            account: this.network.amm.contract,
+            name: 'stakelastpos',
+            authorization: [this.user.authorization],
+            data: {
+              incentiveId: incentive.id,
+            }
+          })
+        }
+      }
+
       console.log('new position', { actions })
       const r = await this.$store.dispatch('chain/sendTransaction', actions)
-
-      // Only update new pool with delay
-      // if (actions.length > 1) setTimeout(() => {
-      //   this.$store.dispatch('amm/poolUpdate', poolId)
-      //     .then(() => this.$store.dispatch('amm/fetchPositions'))
-      // }, 2000)
 
       console.log('New position', r)
 
@@ -907,6 +911,7 @@ export default {
         ).catch((e) => {})
       }, 0)
     },
+
     tokenB(token) {
       setTimeout(() => {
         const currentQuery = this.$route.query
@@ -920,6 +925,17 @@ export default {
         ).catch((e) => {})
       }, 0)
     },
+
+    fees() {
+      if (!this.defaultFeeSetted && this.fees.filter(f => !isNaN(f.selectedPercent)).length > 0) {
+        const maxFeeStaked = this.fees.filter(f => !isNaN(f.selectedPercent)).reduce((prev, current) => {
+          return (prev && prev.selectedPercent > current.selectedPercent) ? prev : current
+        })
+
+        this.defaultFeeSetted = true
+        this.feeAmount = maxFeeStaked.value
+      }
+    }
   }
 }
 </script>

@@ -1,21 +1,27 @@
 <template lang="pug">
 div.pools
   .table-header
-    el-input(prefix-icon="el-icon-search" :placeholder="$t('Search name or paste address')")
+    el-input(v-model="search" prefix-icon="el-icon-search" :placeholder="$t('Search Token')")
+    .end
+      AlcorButton(to="/positions/new" access tag="nuxt-link")
+        i.el-icon-plus
+        .fs-14 {{ $t('New Position') }}
   .table.el-card.is-always-shadow
-    PositionsList(@positionClick="$router.push(localeRoute($event.link))")
+    PositionsList(@positionClick="$router.push(localeRoute($event.link))" :search="search")
 </template>
 
 <script>
 import PositionsList from '~/components/amm/Position/PositionsList'
+import AlcorButton from '~/components/AlcorButton'
 
 export default {
   name: 'WalletLiquidityPools',
   components: {
-    PositionsList
+    PositionsList,
+    AlcorButton,
   },
   data: () => ({
-    search: ''
+    search: '',
   }),
 }
 </script>
@@ -23,12 +29,14 @@ export default {
 <style scoped lang="scss">
 .table-header {
   display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
   margin-bottom: 10px;
+  gap: 8px;
 
   .el-input {
     max-width: 300px;
-    margin-right: 8px;
   }
 
   .el-input__inner {

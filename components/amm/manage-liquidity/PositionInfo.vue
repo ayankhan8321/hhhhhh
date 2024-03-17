@@ -1,10 +1,16 @@
 <template lang="pug">
 .pool-info
   .pool-info-header
-    .pool-info-header-main.d-flex.gap-8.align-items-center
+    .pool-info-header-main.d-flex.gap-8.align-items-center.pointer(@click="$router.push('/analytics/pools/' + position.pool.id)")
       PairIcons.pair-icons(v-if="!isMobile" :token1="position.pool[tokensInverted ? 'tokenB' : 'tokenA']" :token2="position.pool[tokensInverted ? 'tokenA' : 'tokenB']")
-      .pairs(v-if="tokensInverted") {{ position.pool.tokenB.symbol }} / {{ position.pool.tokenA.symbol }}
-      .pairs(v-else) {{ position.pool.tokenA.symbol }} / {{ position.pool.tokenB.symbol }}
+      .pairs(v-if="tokensInverted")
+        span {{ position.pool.tokenB.symbol }}
+        span /
+        span {{ position.pool.tokenA.symbol }}
+      .pairs(v-else)
+        span {{ position.pool.tokenA.symbol }}
+        span /
+        span {{ position.pool.tokenB.symbol }}
       .tag {{ poolFee }}%
       RangeIndicator.range-indicator(:inRange="position.inRange")
     .action-slot
@@ -18,24 +24,29 @@
       span.f-18.symbol {{ position.amountA.currency.symbol }}
       span.contract {{ position.pool.tokenA.contract }}
     .amount-percent-container
-      .amount-percent.fs-10 {{ composedPercent(tokensInverted ? 'e' : 'w') }}%
+      .amount-percent.fs-10 {{ composedPercent(tokensInverted ? 'B': 'A') }}%
     .d-flex.align-items-center.justify-content-end.gap-8
-      .fs-18 {{ position.amountA.toFixed() }}
-      .fs-14.color-action (${{ $tokenToUSD(position.amountA.toFixed(), position.pool.tokenA.symbol, position.pool.tokenA.contract) }})
+      .fs-18 {{ position.amountA.toFixed() | commaFloat(position.pool.tokenA.decimals) }}
+      .fs-14.color-action (${{ amountAUSD }})
 
     .d-flex.align-items-center.gap-6.token-b
       TokenImage.token-image(:src="$tokenLogo(position.pool.tokenB.symbol, position.pool.tokenB.contract)" height="25")
       span.f-18.symbol {{ position.amountB.currency.symbol }}
       span.contract {{ position.pool.tokenB.contract }}
     .amount-percent-container.token-b
-      .amount-percent.fs-10 {{ composedPercent(tokensInverted ? 'w' : 'e') }}%
+      .amount-percent.fs-10 {{ composedPercent(tokensInverted ? 'A': 'B') }}%
     .d-flex.align-items-center.justify-content-end.gap-8.token-b
-      .fs-18 {{ position.amountB.toFixed() }}
-      .fs-14.color-action (${{$tokenToUSD(position.amountB.toFixed(), position.pool.tokenB.symbol, position.pool.tokenB.contract)}})
+      .fs-18 {{ position.amountB.toFixed() | commaFloat(position.pool.tokenB.decimals) }}
+      .fs-14.color-action (${{ amountBUSD }})
 
   template(v-if="!noPL")
     .d-flex.justify-content-between.mt-1
       .fs-16 P&L
+        el-popover(placement='bottom-start' width='300' trigger='hover')
+          template
+            .text
+              p Cumulative sum of historical liquidity deposits and withdrawals in USD by the time of action, along with accrued fees.
+          .el-icon-info(slot="reference").ml-2.pointer
       .fs-16 ${{ pNl }}
     .d-flex.justify-content-between.mt-1
       .fs-16 Pool Share
@@ -43,6 +54,11 @@
     .d-flex.justify-content-between.mt-1
       .fs-16 24H Estimated Fees
       .fs-16 ${{ estimatedFees }}
+
+    // TODO
+    //- .d-flex.justify-content-between.mt-1
+    //-   .fs-16 Total Claimed Fees
+    //-   .fs-16 ${{ estimatedFees }}
     //.d-flex.justify-content-between.mt-1
       .fs-16 Estimated APY
       .fs-16 ${{ APY }}
@@ -68,14 +84,26 @@ export default {
     PairIcons
   },
 
-  props: ['noPL', 'position', 'tokensInverted', 'composedPercent'],
+  props: ['noPL', 'position', 'tokensInverted'],
 
   computed: {
     poolFee() {
       return this.position.pool.fee / 10000
     },
 
+    amountAUSD() {
+      const { position } = this
+      return this.$tokenToUSD(position.amountA.toFixed(), position.pool.tokenA.symbol, position.pool.tokenA.contract)
+    },
+
+    amountBUSD() {
+      const { position } = this
+      return this.$tokenToUSD(position.amountB.toFixed(), position.pool.tokenB.symbol, position.pool.tokenB.contract)
+    },
+
     poolShare() {
+      if (!this.position.inRange) return '0.00'
+
       if (JSBI.equal(this.position.pool.liquidity, JSBI.BigInt(0))) return '0.00'
       return (parseFloat(new Fraction(this.position.liquidity, this.position.pool.liquidity).toFixed(6)) * 100).toFixed(2)
     },
@@ -103,6 +131,19 @@ export default {
     APY() {
       return (parseFloat(this.estimatedFees) * 365).toFixed(4)
     }
+  },
+
+  methods: {
+    composedPercent(token) {
+      const tokenA = parseFloat(this.amountAUSD)
+      const tokenB = parseFloat(this.amountBUSD)
+
+      //return (token == (this.tokensInverted ? 'B' : 'A')
+      return (token == (this.tokensInverted ? 'B' : 'A')
+        ? (tokenA * 100) / (tokenA + tokenB)
+        : (tokenB * 100) / (tokenA + tokenB)
+      ).toFixed(0)
+    },
   }
 }
 </script>
@@ -127,10 +168,11 @@ export default {
   .pool-info-header{
     display: grid;
     align-items: center;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr auto;
     grid-template-areas:
-      "main main slot"
-      "amount amount amount";
+      "main slot"
+      "amount amount";
+    column-gap: 8px;
     &-main {
       grid-area: main;
     }
@@ -155,8 +197,15 @@ export default {
     }
   }
   .pairs{
-    font-size: 1.2rem;
+    // white-space: nowrap;
+    display: inline-flex;
+    gap: 4px;
+    font-size: 1.1rem;
     font-weight: bold;
+    flex-wrap: wrap;
+    span {
+      white-space: nowrap;
+    }
   }
   // .symbol-and-contract {
   //   display: flex;
